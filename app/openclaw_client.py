@@ -11,7 +11,7 @@ from app.settings import Settings
 OPENCLAW_INSTRUCTION = (
     "Extract important schedule items and todos from this Plaud transcript. "
     "Send a concise summary to the user's Discord and register calendar events "
-    "using available Calendar MCP tools."
+    "using available Calendar from MacBook Pro node's apple osascript, or Reminder from MacBook Pro node's skills "
 )
 
 
