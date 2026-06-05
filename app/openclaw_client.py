@@ -10,8 +10,16 @@ from app.settings import Settings
 
 OPENCLAW_INSTRUCTION = (
     "Extract important schedule items and todos from this Plaud transcript. "
-    "Send a concise summary to the user's Discord and register calendar events "
-    "using available Calendar from MacBook Pro node's apple osascript, or Reminder from MacBook Pro node's skills "
+    "Send a concise summary to the user's Discord. "
+    "Register explicit appointments, meetings, dated TODOs, and deadlines using Apple Calendar only, "
+    "via the MacBook Pro node's Apple Calendar osascript route. "
+    "Do not use Apple Reminders or OpenClaw cron/reminder fallback unless the user explicitly requests a chat reminder. "
+    "If the transcript lets you infer affiliation or ownership context such as project, team, client, customer, "
+    "organization, meeting group, or key participants, include that context in Calendar titles when useful and "
+    "always include the relevant context and short transcript evidence in Calendar notes. "
+    "Do not invent affiliation context; if it is uncertain, say so in the notes. "
+    "If a TODO has no date or time, include it in the Discord summary only. "
+    "If Calendar registration fails, include the exact failure reason in the Discord summary."
 )
 
 
