@@ -8,11 +8,32 @@ import httpx
 from app.settings import Settings
 
 
-OPENCLAW_INSTRUCTION = (
-    "Extract important schedule items and todos from this Plaud transcript. "
-    "Send a concise summary to the user's Discord and register calendar events "
-    "using available Calendar from MacBook Pro node's apple osascript, or Reminder from MacBook Pro node's skills "
-)
+OPENCLAW_INSTRUCTION = """Extract important schedule items and todos from this Plaud transcript.
+First create a structured extraction result using this exact JSON shape:
+{
+  "calendar_items": [
+    {
+      "title": "string",
+      "start": "ISO datetime or date",
+      "end": "ISO datetime or date",
+      "all_day": true,
+      "notes": "string",
+      "source_type": "meeting|deadline|todo"
+    }
+  ],
+  "undated_todos": ["string"],
+  "summary": "string"
+}
+
+Send a concise summary to the user's Discord.
+Register all dated schedule items and dated TODOs using Apple Calendar only,
+via the MacBook Pro node's Apple Calendar osascript route.
+Register explicit appointments and meetings as Calendar events.
+Register dated TODOs and deadlines as Calendar events or all-day deadline items.
+Do not use Apple Reminders or OpenClaw cron/reminder fallback.
+Do not use any reminder tool unless the user explicitly requests a chat reminder.
+For undated TODOs, summarize them in Discord only.
+If Calendar registration fails, include the exact failure reason in the Discord summary."""
 
 
 class OpenClawError(RuntimeError):
