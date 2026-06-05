@@ -16,6 +16,7 @@ from app.settings import Settings
 def settings() -> Settings:
     return Settings(
         webhook_token="zapier-secret",
+        openclaw_mode="http",
         openclaw_webhook_url="https://openclaw.example/webhook",
         openclaw_auth_token="openclaw-secret",
     )

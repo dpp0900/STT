@@ -9,6 +9,7 @@ from app.settings import get_settings
 @pytest.fixture(autouse=True)
 def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WEBHOOK_TOKEN", "zapier-secret")
+    monkeypatch.setenv("OPENCLAW_MODE", "http")
     monkeypatch.setenv("OPENCLAW_WEBHOOK_URL", "https://openclaw.example/webhook")
     monkeypatch.setenv("OPENCLAW_AUTH_TOKEN", "openclaw-secret")
     get_settings.cache_clear()
