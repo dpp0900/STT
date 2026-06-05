@@ -31,7 +31,8 @@ def test_build_openclaw_payload(settings: Settings) -> None:
     assert payload["source"] == "plaud"
     assert payload["text"].startswith("다음 주")
     assert "Discord" in payload["instruction"]
-    assert "Calendar MCP" in payload["instruction"]
+    assert "Calendar" in payload["instruction"]
+    assert "MacBook Pro node" in payload["instruction"]
     assert payload["metadata"]["received_via"] == "zapier"
     assert payload["metadata"]["service"] == "plaud-to-openclaw"
     assert payload["metadata"]["request_id"] == "request-123"
@@ -48,7 +49,8 @@ def test_build_openclaw_cli_message(settings: Settings) -> None:
     assert "Request ID: request-cli" in message
     assert "Transcript:" in message
     assert "Discord" in message
-    assert "Calendar MCP" in message
+    assert "Calendar" in message
+    assert "MacBook Pro node" in message
 
 
 async def test_submit_transcript_sends_json_and_auth(settings: Settings) -> None:
