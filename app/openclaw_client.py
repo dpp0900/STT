@@ -11,6 +11,11 @@ from app.settings import Settings
 OPENCLAW_INSTRUCTION = """Extract important schedule items and todos from this Plaud transcript.
 First create a structured extraction result using this exact JSON shape:
 {
+  "context": {
+    "affiliation": "project/team/client/customer/organization/person context, or null",
+    "confidence": "high|medium|low",
+    "evidence": "short transcript evidence for the inferred context"
+  },
   "calendar_items": [
     {
       "title": "string",
@@ -24,12 +29,20 @@ First create a structured extraction result using this exact JSON shape:
   "undated_todos": ["string"],
   "summary": "string"
 }
+If the transcript lets you infer conversation affiliation or ownership context
+such as project, team, client, customer, organization, meeting group, or key
+participants, include that context in the structured context object.
+Do not invent affiliation context. If it is uncertain, mark confidence as low
+and explain the evidence briefly.
 
 Send a concise summary to the user's Discord.
 Register all dated schedule items and dated TODOs using Apple Calendar only,
 via the MacBook Pro node's Apple Calendar osascript route.
 Register explicit appointments and meetings as Calendar events.
 Register dated TODOs and deadlines as Calendar events or all-day deadline items.
+Include the inferred affiliation/ownership context in Calendar titles when it
+helps disambiguate the item, and always include relevant context and evidence in
+the Calendar notes.
 Do not use Apple Reminders or OpenClaw cron/reminder fallback.
 Do not use any reminder tool unless the user explicitly requests a chat reminder.
 For undated TODOs, summarize them in Discord only.

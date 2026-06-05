@@ -34,6 +34,11 @@ def test_build_openclaw_payload(settings: Settings) -> None:
     assert "Discord" in payload["instruction"]
     assert "Apple Calendar only" in payload["instruction"]
     assert "MacBook Pro node's Apple Calendar osascript route" in payload["instruction"]
+    assert "context" in payload["instruction"]
+    assert "affiliation" in payload["instruction"]
+    assert "project, team, client, customer" in payload["instruction"]
+    assert "Do not invent affiliation context" in payload["instruction"]
+    assert "Calendar notes" in payload["instruction"]
     assert "calendar_items" in payload["instruction"]
     assert "undated_todos" in payload["instruction"]
     assert "source_type" in payload["instruction"]
@@ -58,6 +63,10 @@ def test_build_openclaw_cli_message(settings: Settings) -> None:
     assert "Discord" in message
     assert "Apple Calendar only" in message
     assert "MacBook Pro node's Apple Calendar osascript route" in message
+    assert "context" in message
+    assert "affiliation" in message
+    assert "Do not invent affiliation context" in message
+    assert "Calendar notes" in message
     assert "calendar_items" in message
     assert "undated_todos" in message
     assert "Do not use Apple Reminders" in message
