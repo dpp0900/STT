@@ -1,0 +1,25 @@
+.DS_Store
+
+# dependencies
+node_modules/
+
+# build/cache output
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# local secrets and runtime state
+.env
+.env.*
+!.env.example
+data/
+.omx/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

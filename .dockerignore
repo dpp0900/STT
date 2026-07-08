@@ -1,0 +1,16 @@
+.git
+.next
+.omx
+data
+node_modules
+coverage
+dist
+
+.env
+.env.*
+!.env.example
+
+*.log
+*.tsbuildinfo
+.DS_Store
+docker-compose.yml
