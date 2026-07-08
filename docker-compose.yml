@@ -1,4 +1,12 @@
 services:
+  openclaw-loopback:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - "TCP-LISTEN:${OPENCLAW_PROXY_PORT:-18790},bind=${OPENCLAW_PROXY_BIND:-172.17.0.1},fork,reuseaddr"
+      - "TCP:127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}"
+
   plaude-stt:
     build:
       context: .

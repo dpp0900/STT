@@ -159,6 +159,20 @@ async function parseError(response: Response): Promise<string> {
   return text.slice(0, 500);
 }
 
+function openClawErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "OpenClaw send failed.";
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const code = "code" in cause && typeof cause.code === "string" ? cause.code : null;
+    const message =
+      "message" in cause && typeof cause.message === "string" ? cause.message : null;
+    if (code || message) {
+      return `OpenClaw request failed${code ? ` (${code})` : ""}: ${message ?? error.message}`;
+    }
+  }
+  return `OpenClaw request failed: ${error.message}`;
+}
+
 export function publicOpenClawSettings(settings: OpenClawSettings): Omit<
   OpenClawSettings,
   "encryptedWebhookToken"
@@ -300,7 +314,7 @@ export async function notifyOpenClawForCompletedTranscription(
     await setDeliveryState(recordingId, model, {
       ...baseDelivery,
       status: "failed",
-      error: error instanceof Error ? error.message : "OpenClaw send failed.",
+      error: openClawErrorMessage(error),
       updatedAt: new Date().toISOString()
     });
   } finally {

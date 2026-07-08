@@ -156,23 +156,26 @@ The app can send the final transcript to OpenClaw after STT completes and LLM
 cleanup succeeds. It calls OpenClaw's hook agent endpoint, usually:
 
 ```text
-http://host.docker.internal:18789/hooks/agent
+http://host.docker.internal:18790/hooks/agent
 ```
 
 Enable OpenClaw hooks in the OpenClaw Gateway config with a dedicated hook token,
 then paste that URL and token in this app's Settings -> OpenClaw. In Docker,
-`docker-compose.yml` maps `host.docker.internal` to the Ubuntu host gateway so a
-container can reach a Gateway running on the host.
+`docker-compose.yml` runs a small loopback proxy that forwards
+`host.docker.internal:18790` to a Gateway bound on the Ubuntu host at
+`127.0.0.1:18789`. This avoids exposing OpenClaw outside the Docker host.
 
 Optional env overrides:
 
 ```bash
 OPENCLAW_ENABLED=true
-OPENCLAW_WEBHOOK_URL=http://host.docker.internal:18789/hooks/agent
+OPENCLAW_WEBHOOK_URL=http://host.docker.internal:18790/hooks/agent
 OPENCLAW_HOOK_TOKEN=<shared hook token>
 OPENCLAW_MODEL=
 OPENCLAW_THINKING=
 OPENCLAW_DELIVER=false
+OPENCLAW_GATEWAY_PORT=18789
+OPENCLAW_PROXY_PORT=18790
 ```
 
 OpenClaw sends use an idempotency key derived from the recording, STT model, and
