@@ -183,6 +183,8 @@ export interface OpenClawSettings {
   model: string;
   thinking: string;
   deliver: boolean;
+  deliveryChannel: string;
+  deliveryTarget: string;
   promptTemplate: string;
   updatedAt: string | null;
 }
@@ -361,6 +363,8 @@ export function defaultOpenClawSettings(): OpenClawSettings {
     model: "",
     thinking: "",
     deliver: false,
+    deliveryChannel: "discord",
+    deliveryTarget: "",
     promptTemplate: DEFAULT_OPENCLAW_PROMPT_TEMPLATE,
     updatedAt: null
   };
@@ -535,6 +539,14 @@ function normalizeOpenClawSettings(
         : defaults.thinking,
     deliver:
       typeof merged.deliver === "boolean" ? merged.deliver : defaults.deliver,
+    deliveryChannel:
+      typeof merged.deliveryChannel === "string"
+        ? merged.deliveryChannel.trim()
+        : defaults.deliveryChannel,
+    deliveryTarget:
+      typeof merged.deliveryTarget === "string"
+        ? merged.deliveryTarget.trim()
+        : defaults.deliveryTarget,
     promptTemplate:
       typeof merged.promptTemplate === "string" && merged.promptTemplate.trim()
         ? merged.promptTemplate

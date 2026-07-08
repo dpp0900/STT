@@ -173,11 +173,16 @@ OPENCLAW_HOOK_TOKEN=<shared hook token>
 OPENCLAW_MODEL=
 OPENCLAW_THINKING=
 OPENCLAW_DELIVER=false
+OPENCLAW_DELIVERY_CHANNEL=discord
+OPENCLAW_DELIVERY_TARGET=<discord user or channel id>
 ```
 
 OpenClaw sends use an idempotency key derived from the recording, STT model, and
 final transcript hash. If cleanup is enabled and fails, the transcript is not
 sent; after a successful cleanup retry, it is sent automatically.
+When `OPENCLAW_DELIVER=true`, `OPENCLAW_DELIVERY_CHANNEL=discord`, and a delivery
+target is set, OpenClaw sends the agent reply back through Discord after it
+processes the transcript.
 
 ## Notes
 

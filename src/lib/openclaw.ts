@@ -21,6 +21,8 @@ interface EffectiveOpenClawSettings {
   model: string;
   thinking: string;
   deliver: boolean;
+  deliveryChannel: string;
+  deliveryTarget: string;
   promptTemplate: string;
 }
 
@@ -71,6 +73,12 @@ async function effectiveSettings(
     model: envValue("OPENCLAW_MODEL") || settings.model,
     thinking: envValue("OPENCLAW_THINKING") || settings.thinking,
     deliver: envBoolean("OPENCLAW_DELIVER") ?? settings.deliver,
+    deliveryChannel:
+      envValue("OPENCLAW_DELIVERY_CHANNEL", "OPENCLAW_CHANNEL") ||
+      settings.deliveryChannel,
+    deliveryTarget:
+      envValue("OPENCLAW_DELIVERY_TARGET", "OPENCLAW_TO") ||
+      settings.deliveryTarget,
     promptTemplate: settings.promptTemplate || DEFAULT_OPENCLAW_PROMPT_TEMPLATE
   };
 }
@@ -286,6 +294,8 @@ export async function notifyOpenClawForCompletedTranscription(
   };
   if (settings.model) payload.model = settings.model;
   if (settings.thinking) payload.thinking = settings.thinking;
+  if (settings.deliver && settings.deliveryChannel) payload.channel = settings.deliveryChannel;
+  if (settings.deliver && settings.deliveryTarget) payload.to = settings.deliveryTarget;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPENCLAW_REQUEST_TIMEOUT_MS);

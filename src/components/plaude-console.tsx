@@ -204,6 +204,8 @@ interface OpenClawSettings {
   model: string;
   thinking: string;
   deliver: boolean;
+  deliveryChannel: string;
+  deliveryTarget: string;
   promptTemplate: string;
   updatedAt: string | null;
 }
@@ -1075,6 +1077,32 @@ function OpenClawSettingsCard({
           <small>Leave off if OpenClaw should only create an internal agent run.</small>
         </span>
       </label>
+      <div className="settings-grid">
+        <label>
+          <span>Reply channel</span>
+          <input
+            value={settings.deliveryChannel}
+            onChange={(event) =>
+              onChange({ ...settings, deliveryChannel: event.target.value })
+            }
+            placeholder="discord"
+            aria-label="OpenClaw delivery channel"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          <span>Reply to</span>
+          <input
+            value={settings.deliveryTarget}
+            onChange={(event) =>
+              onChange({ ...settings, deliveryTarget: event.target.value })
+            }
+            placeholder="Discord user or channel id"
+            aria-label="OpenClaw delivery target"
+            spellCheck={false}
+          />
+        </label>
+      </div>
       <textarea
         value={settings.promptTemplate}
         onChange={(event) =>
@@ -1966,6 +1994,8 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
           model: openClawSettings.model,
           thinking: openClawSettings.thinking,
           deliver: openClawSettings.deliver,
+          deliveryChannel: openClawSettings.deliveryChannel,
+          deliveryTarget: openClawSettings.deliveryTarget,
           promptTemplate: openClawSettings.promptTemplate
         })
       });

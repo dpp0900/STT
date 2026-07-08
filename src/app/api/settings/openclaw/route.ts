@@ -36,6 +36,8 @@ export async function PUT(request: Request) {
       model?: unknown;
       thinking?: unknown;
       deliver?: unknown;
+      deliveryChannel?: unknown;
+      deliveryTarget?: unknown;
       promptTemplate?: unknown;
     } | null;
 
@@ -69,6 +71,14 @@ export async function PUT(request: Request) {
             : current.thinking,
         deliver:
           typeof body.deliver === "boolean" ? body.deliver : current.deliver,
+        deliveryChannel:
+          typeof body.deliveryChannel === "string"
+            ? body.deliveryChannel.trim()
+            : current.deliveryChannel,
+        deliveryTarget:
+          typeof body.deliveryTarget === "string"
+            ? body.deliveryTarget.trim()
+            : current.deliveryTarget,
         promptTemplate:
           typeof body.promptTemplate === "string" && body.promptTemplate.trim()
             ? body.promptTemplate
