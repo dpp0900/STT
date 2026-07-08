@@ -69,6 +69,9 @@ APP_LOGIN_PASSWORD_SALT=<random salt>
 
 For local-only testing, `APP_LOGIN_PASSWORD=<plain password>` is also supported.
 Do not use the plaintext password variable in hosted deployments.
+Login cookies automatically use `Secure` only when the request is HTTPS. If an
+HTTPS reverse proxy does not send `X-Forwarded-Proto: https`, set
+`APP_AUTH_COOKIE_SECURE=true`.
 
 Generate a password hash with:
 
@@ -105,9 +108,10 @@ ssh -L 3000:localhost:3000 -L 8199:localhost:8199 user@server
 
 Then browse to `http://localhost:3000` and press `Connect in browser`.
 
-In Docker, `docker-compose.yml` publishes both `3000` and `8199` and sets
-`PLAUD_OAUTH_LOOPBACK_HOST=0.0.0.0` so the loopback callback is reachable through
-the Docker port mapping.
+In Docker, `docker-compose.yml` publishes the app on `${APP_PORT:-3000}` and
+binds the Plaud loopback callback to `127.0.0.1:${PLAUD_OAUTH_LOOPBACK_PORT:-8199}`.
+Use an SSH tunnel for the callback unless you intentionally add a public callback
+endpoint.
 
 Optional deployment overrides:
 

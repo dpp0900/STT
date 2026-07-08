@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       success: true,
       user: { id: username }
     });
-    await setSessionCookie(response, username);
+    await setSessionCookie(response, username, request);
     return response;
   } catch (error) {
     const normalized = normalizeError(error);

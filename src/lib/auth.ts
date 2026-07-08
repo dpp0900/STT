@@ -8,6 +8,7 @@ const SESSION_COOKIE = "plaude_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const PASSWORD_ITERATIONS = 210_000;
 const DEFAULT_LOGIN_ID = "admin";
+const SECURE_COOKIE_ENV = "APP_AUTH_COOKIE_SECURE";
 
 interface SessionPayload {
   sub: string;
@@ -99,25 +100,59 @@ export function verifyLogin(username: string, password: string): boolean {
   return timingSafeStringEqual(actualHash, expectedHash);
 }
 
-export async function setSessionCookie(response: NextResponse, username: string): Promise<void> {
+function configuredSecureCookie(): boolean | null {
+  const configured = process.env[SECURE_COOKIE_ENV]?.trim().toLowerCase();
+  if (!configured) return null;
+  if (["1", "true", "yes", "on"].includes(configured)) return true;
+  if (["0", "false", "no", "off"].includes(configured)) return false;
+  return null;
+}
+
+function requestUsesHttps(request: Request): boolean {
+  const forwardedProto = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  try {
+    return new URL(request.url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function shouldUseSecureCookie(request: Request): boolean {
+  const configured = configuredSecureCookie();
+  if (configured !== null) return configured;
+  if (process.env.NODE_ENV !== "production") return false;
+  return requestUsesHttps(request);
+}
+
+export async function setSessionCookie(
+  response: NextResponse,
+  username: string,
+  request: Request
+): Promise<void> {
   response.cookies.set({
     name: SESSION_COOKIE,
     value: await createSessionToken(username),
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(request),
     path: "/",
     maxAge: SESSION_TTL_SECONDS
   });
 }
 
-export function clearSessionCookie(response: NextResponse): void {
+export function clearSessionCookie(response: NextResponse, request: Request): void {
   response.cookies.set({
     name: SESSION_COOKIE,
     value: "",
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(request),
     path: "/",
     maxAge: 0
   });
