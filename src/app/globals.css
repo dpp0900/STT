@@ -1361,8 +1361,37 @@ code {
 .transcript-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   flex: 0 0 auto;
+}
+
+.transcript-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid #d7ded9;
+  border-radius: 6px;
+  background: #edf2ef;
+}
+
+.transcript-view-toggle button {
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 8px;
+  background: transparent;
+  color: #59645e;
+  font-size: 0.72rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.transcript-view-toggle button.active {
+  background: #ffffff;
+  color: var(--cobalt-dark);
+  box-shadow: 0 1px 4px rgba(29, 43, 35, 0.12);
 }
 
 .transcript-meta {

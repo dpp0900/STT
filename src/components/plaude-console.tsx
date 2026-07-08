@@ -436,6 +436,10 @@ function transcriptionText(transcription: TranscriptionState): string {
   return transcription.text || transcription.error || "No transcript text yet.";
 }
 
+function rawTranscriptionText(transcription: TranscriptionState): string {
+  return transcription.text || transcription.error || "No transcript text yet.";
+}
+
 function activeProgress(
   transcription: TranscriptionState | null | undefined
 ): TranscriptionProgress | null {
@@ -899,7 +903,9 @@ function TranscriptStack({
   variants,
   sttSettings,
   expandedTranscripts,
+  rawTranscriptViews,
   toggleTranscript,
+  setTranscriptView,
   copyTranscript,
   cleanupTranscript,
   busy
@@ -908,7 +914,9 @@ function TranscriptStack({
   variants: TranscriptionState[];
   sttSettings: SttSettings | null;
   expandedTranscripts: Set<string>;
+  rawTranscriptViews: Set<string>;
   toggleTranscript: (id: string) => void;
+  setTranscriptView: (id: string, view: "cleaned" | "raw") => void;
   copyTranscript: (text: string) => Promise<void>;
   cleanupTranscript: (recordingId: string, model: string) => void;
   busy: string | null;
@@ -927,12 +935,14 @@ function TranscriptStack({
         const transcriptOpen = transcriptDefaultsOpen
           ? !expandedTranscripts.has(toggleKey)
           : expandedTranscripts.has(toggleKey);
-        const text = transcriptionText(transcript);
         const provider = providerForModel(transcript.model);
-        const speakerTurns = parseSpeakerTurns(text);
         const postprocess = transcript.postprocess;
         const cleaned = postprocess?.status === "completed" && Boolean(postprocess.text);
-        const copyText = cleaned ? postprocess?.text ?? text : transcript.text;
+        const showingRaw = cleaned && rawTranscriptViews.has(toggleKey);
+        const rawText = rawTranscriptionText(transcript);
+        const text = cleaned && !showingRaw ? postprocess?.text ?? rawText : rawText;
+        const speakerTurns = parseSpeakerTurns(text);
+        const copyText = text;
         const cleanupBusy = busy === cleanupBusyKey(recordingId, transcript.model);
         const progressState = activeProgress(transcript);
 
@@ -952,6 +962,24 @@ function TranscriptStack({
                 <span>{transcriptionStatusLabel(transcript.status)}</span>
               </div>
               <div className="transcript-actions">
+                {cleaned && (
+                  <div className="transcript-view-toggle" aria-label="Transcript view" role="group">
+                    <button
+                      type="button"
+                      className={!showingRaw ? "active" : ""}
+                      onClick={() => setTranscriptView(toggleKey, "cleaned")}
+                    >
+                      Cleaned
+                    </button>
+                    <button
+                      type="button"
+                      className={showingRaw ? "active" : ""}
+                      onClick={() => setTranscriptView(toggleKey, "raw")}
+                    >
+                      Raw
+                    </button>
+                  </div>
+                )}
                 {copyText && (
                   <button
                     type="button"
@@ -986,6 +1014,7 @@ function TranscriptStack({
               <span>{transcript.model}</span>
               <span>{provider === "soniox" ? "full file" : `${transcript.chunks.length} chunks`}</span>
               {postprocess && <span>cleanup: {postprocess.model}</span>}
+              {cleaned && <span>{showingRaw ? "raw view" : "cleaned view"}</span>}
               {speakerTurns.length >= 3 && <span>{speakerTurns.length.toLocaleString()} turns</span>}
               <span>{text.length.toLocaleString()} chars</span>
               <span>{formatDate(transcript.updatedAt)}</span>
@@ -1035,6 +1064,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailRecordingId, setDetailRecordingId] = useState<string | null>(null);
   const [expandedTranscripts, setExpandedTranscripts] = useState<Set<string>>(new Set());
+  const [rawTranscriptViews, setRawTranscriptViews] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   const loadConnection = useCallback(async () => {
@@ -1704,6 +1734,15 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     });
   };
 
+  const setTranscriptView = (id: string, view: "cleaned" | "raw") => {
+    setRawTranscriptViews((current) => {
+      const next = new Set(current);
+      if (view === "raw") next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
   const copyTranscript = async (text: string) => {
     await navigator.clipboard.writeText(text);
     setNotice({ type: "ok", text: "Transcript copied." });
@@ -2202,7 +2241,9 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     variants={detailVariants}
                     sttSettings={sttSettings}
                     expandedTranscripts={expandedTranscripts}
+                    rawTranscriptViews={rawTranscriptViews}
                     toggleTranscript={toggleTranscript}
+                    setTranscriptView={setTranscriptView}
                     copyTranscript={copyTranscript}
                     cleanupTranscript={(recordingId, model) => void cleanupTranscript(recordingId, model)}
                     busy={busy}
