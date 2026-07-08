@@ -994,6 +994,101 @@ code {
   justify-content: flex-end;
 }
 
+.sync-progress-panel {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #f7faf9;
+}
+
+.sync-progress-panel.failed {
+  background: #fff8f4;
+}
+
+.sync-progress-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #d3ddd7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--cobalt);
+}
+
+.sync-progress-panel.failed .sync-progress-icon {
+  border-color: #f0c9bd;
+  color: var(--danger);
+}
+
+.sync-progress-main {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sync-progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sync-progress-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sync-progress-row span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.sync-progress-row strong {
+  min-width: 0;
+  color: #25302a;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.sync-progress-row em {
+  flex: 0 0 auto;
+  color: var(--cobalt-dark);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.sync-track span {
+  background: linear-gradient(90deg, var(--cobalt), #2f8a63);
+}
+
+.sync-progress-details {
+  color: #536058;
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sync-progress-error {
+  padding: 7px 9px;
+  border-left: 3px solid var(--danger);
+  background: #fff1ed;
+  color: var(--danger);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .recording-list {
   display: grid;
 }
@@ -1772,6 +1867,14 @@ code {
   .automation-status,
   .settings-button-row {
     grid-template-columns: 1fr;
+  }
+
+  .sync-progress-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-progress-row {
+    display: grid;
   }
 
   .usage-metrics {

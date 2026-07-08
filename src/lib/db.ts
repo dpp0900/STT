@@ -69,6 +69,25 @@ export interface AutomationSettings {
   updatedAt: string | null;
 }
 
+export interface SyncProgressState {
+  status: "idle" | "running" | "completed" | "failed";
+  stage: "idle" | "listing" | "downloading" | "completed" | "failed";
+  scope: "all" | "selected";
+  requested: number | null;
+  total: number;
+  completed: number;
+  newRecordings: number;
+  updatedRecordings: number;
+  skippedRecordings: number;
+  failedRecordings: number;
+  currentRecordingId: string | null;
+  currentFilename: string | null;
+  errors: string[];
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface TranscriptionUsage {
   seconds?: number;
   total_tokens?: number;
@@ -173,6 +192,7 @@ export interface PlaudeDb {
   recordings: LocalRecording[];
   sttSettings: SttSettings;
   automationSettings: AutomationSettings;
+  syncProgress: SyncProgressState;
   openClawSettings: OpenClawSettings;
 }
 
@@ -311,6 +331,27 @@ export function defaultAutomationSettings(): AutomationSettings {
   };
 }
 
+export function defaultSyncProgressState(): SyncProgressState {
+  return {
+    status: "idle",
+    stage: "idle",
+    scope: "all",
+    requested: null,
+    total: 0,
+    completed: 0,
+    newRecordings: 0,
+    updatedRecordings: 0,
+    skippedRecordings: 0,
+    failedRecordings: 0,
+    currentRecordingId: null,
+    currentFilename: null,
+    errors: [],
+    startedAt: null,
+    completedAt: null,
+    updatedAt: null
+  };
+}
+
 export function defaultOpenClawSettings(): OpenClawSettings {
   return {
     enabled: false,
@@ -330,6 +371,7 @@ const EMPTY_DB: PlaudeDb = {
   recordings: [],
   sttSettings: defaultSttSettings(),
   automationSettings: defaultAutomationSettings(),
+  syncProgress: defaultSyncProgressState(),
   openClawSettings: defaultOpenClawSettings()
 };
 
@@ -411,6 +453,51 @@ function normalizeAutomationSettings(
       typeof merged.lastRunCompletedAt === "string" ? merged.lastRunCompletedAt : null,
     lastRunMessage:
       typeof merged.lastRunMessage === "string" ? merged.lastRunMessage : null,
+    updatedAt: typeof merged.updatedAt === "string" ? merged.updatedAt : null
+  };
+}
+
+function normalizeSyncProgressState(
+  state: Partial<SyncProgressState> | undefined
+): SyncProgressState {
+  const defaults = defaultSyncProgressState();
+  const merged = {
+    ...defaults,
+    ...(state ?? {})
+  };
+  const status = ["idle", "running", "completed", "failed"].includes(String(merged.status))
+    ? merged.status
+    : defaults.status;
+  const stage = ["idle", "listing", "downloading", "completed", "failed"].includes(
+    String(merged.stage)
+  )
+    ? merged.stage
+    : defaults.stage;
+  const scope = merged.scope === "selected" ? "selected" : "all";
+  return {
+    ...merged,
+    status,
+    stage,
+    scope,
+    requested:
+      typeof merged.requested === "number" && Number.isFinite(merged.requested)
+        ? Math.max(0, Math.round(merged.requested))
+        : null,
+    total: Math.max(0, Math.round(Number(merged.total) || 0)),
+    completed: Math.max(0, Math.round(Number(merged.completed) || 0)),
+    newRecordings: Math.max(0, Math.round(Number(merged.newRecordings) || 0)),
+    updatedRecordings: Math.max(0, Math.round(Number(merged.updatedRecordings) || 0)),
+    skippedRecordings: Math.max(0, Math.round(Number(merged.skippedRecordings) || 0)),
+    failedRecordings: Math.max(0, Math.round(Number(merged.failedRecordings) || 0)),
+    currentRecordingId:
+      typeof merged.currentRecordingId === "string" ? merged.currentRecordingId : null,
+    currentFilename:
+      typeof merged.currentFilename === "string" ? merged.currentFilename : null,
+    errors: Array.isArray(merged.errors)
+      ? merged.errors.filter((error): error is string => typeof error === "string")
+      : [],
+    startedAt: typeof merged.startedAt === "string" ? merged.startedAt : null,
+    completedAt: typeof merged.completedAt === "string" ? merged.completedAt : null,
     updatedAt: typeof merged.updatedAt === "string" ? merged.updatedAt : null
   };
 }
@@ -515,6 +602,7 @@ export async function readDb(): Promise<PlaudeDb> {
         : [],
       sttSettings: normalizeSttSettings(parsed.sttSettings),
       automationSettings: normalizeAutomationSettings(parsed.automationSettings),
+      syncProgress: normalizeSyncProgressState(parsed.syncProgress),
       openClawSettings: normalizeOpenClawSettings(parsed.openClawSettings)
     };
   } catch {

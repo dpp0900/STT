@@ -1,6 +1,13 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { decryptSecret, encryptSecret } from "@/lib/crypto-store";
-import { readDb, updateDb, type LocalRecording, type PlaudConnection } from "@/lib/db";
+import {
+  defaultSyncProgressState,
+  readDb,
+  updateDb,
+  type LocalRecording,
+  type PlaudConnection,
+  type SyncProgressState
+} from "@/lib/db";
 import { PlaudClient } from "@/lib/plaud/client";
 import { PlaudDeveloperClient } from "@/lib/plaud/developer-client";
 import {
@@ -20,6 +27,8 @@ export interface SyncResult {
   skippedRecordings: number;
   errors: string[];
 }
+
+type SyncProgressPatch = Partial<SyncProgressState>;
 
 interface PlaudAudioClient {
   readonly workspaceId?: string;
@@ -154,6 +163,17 @@ async function listAllRemoteRecordings(
   return selectedIds ? all.filter((record) => selectedIds.has(record.id)) : all;
 }
 
+async function setSyncProgress(patch: SyncProgressPatch): Promise<void> {
+  await updateDb((db) => {
+    db.syncProgress = {
+      ...defaultSyncProgressState(),
+      ...db.syncProgress,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+  });
+}
+
 export async function syncRecordings(fileIds?: string[]): Promise<SyncResult> {
   const db = await readDb();
   if (!db.connection) {
@@ -162,8 +182,6 @@ export async function syncRecordings(fileIds?: string[]): Promise<SyncResult> {
 
   const client = await createClientFromConnection(db.connection);
   const selectedIds = fileIds?.length ? new Set(fileIds) : undefined;
-  const remotes = await listAllRemoteRecordings(client, selectedIds);
-
   const result: SyncResult = {
     newRecordings: 0,
     updatedRecordings: 0,
@@ -171,57 +189,123 @@ export async function syncRecordings(fileIds?: string[]): Promise<SyncResult> {
     errors: []
   };
 
-  const existingById = new Map(db.recordings.map((record) => [record.id, record]));
-  const updates = new Map<string, LocalRecording>();
+  await setSyncProgress({
+    status: "running",
+    stage: "listing",
+    scope: selectedIds ? "selected" : "all",
+    requested: selectedIds?.size ?? null,
+    total: selectedIds?.size ?? 0,
+    completed: 0,
+    newRecordings: 0,
+    updatedRecordings: 0,
+    skippedRecordings: 0,
+    failedRecordings: 0,
+    currentRecordingId: null,
+    currentFilename: selectedIds ? "Finding selected recordings" : "Finding recordings",
+    errors: [],
+    startedAt: new Date().toISOString(),
+    completedAt: null
+  });
 
-  for (const remote of remotes) {
-    try {
-      const existing = existingById.get(remote.id);
-      const versionMatches = existing?.versionMs === remote.version_ms;
-      const fileExists = await audioFileExists(existing?.storagePath ?? null);
+  try {
+    const remotes = await listAllRemoteRecordings(client, selectedIds);
 
-      if (existing && versionMatches && fileExists) {
-        result.skippedRecordings += 1;
-        updates.set(remote.id, {
-          ...toLocalRecording(remote, existing.storagePath, existing.downloadedAt, existing),
-          updatedAt: new Date().toISOString()
-        });
-        continue;
+    await setSyncProgress({
+      stage: "downloading",
+      total: remotes.length,
+      currentFilename: remotes.length ? remotes[0].filename : "No recordings to download"
+    });
+
+    const existingById = new Map(db.recordings.map((record) => [record.id, record]));
+    const updates = new Map<string, LocalRecording>();
+
+    for (const remote of remotes) {
+      await setSyncProgress({
+        currentRecordingId: remote.id,
+        currentFilename: remote.filename
+      });
+
+      try {
+        const existing = existingById.get(remote.id);
+        const versionMatches = existing?.versionMs === remote.version_ms;
+        const fileExists = await audioFileExists(existing?.storagePath ?? null);
+
+        if (existing && versionMatches && fileExists) {
+          result.skippedRecordings += 1;
+          updates.set(remote.id, {
+            ...toLocalRecording(remote, existing.storagePath, existing.downloadedAt, existing),
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          const storagePath = storageKeyForRecording(remote.id, remote.filename);
+          const audio = await client.downloadRecording(remote.id, false);
+          await saveAudioFile(storagePath, audio);
+          const downloadedRemote = {
+            ...remote,
+            filesize: remote.filesize || audio.length
+          };
+          updates.set(
+            remote.id,
+            toLocalRecording(downloadedRemote, storagePath, new Date().toISOString(), existing)
+          );
+
+          if (existing) result.updatedRecordings += 1;
+          else result.newRecordings += 1;
+        }
+      } catch (error) {
+        result.errors.push(
+          `${remote.filename}: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
 
-      const storagePath = storageKeyForRecording(remote.id, remote.filename);
-      const audio = await client.downloadRecording(remote.id, false);
-      await saveAudioFile(storagePath, audio);
-      const downloadedRemote = {
-        ...remote,
-        filesize: remote.filesize || audio.length
-      };
-      updates.set(
-        remote.id,
-        toLocalRecording(downloadedRemote, storagePath, new Date().toISOString(), existing)
-      );
-
-      if (existing) result.updatedRecordings += 1;
-      else result.newRecordings += 1;
-    } catch (error) {
-      result.errors.push(
-        `${remote.filename}: ${error instanceof Error ? error.message : String(error)}`
-      );
+      await setSyncProgress({
+        completed: result.newRecordings + result.updatedRecordings + result.skippedRecordings + result.errors.length,
+        newRecordings: result.newRecordings,
+        updatedRecordings: result.updatedRecordings,
+        skippedRecordings: result.skippedRecordings,
+        failedRecordings: result.errors.length,
+        errors: result.errors.slice(-5)
+      });
     }
+
+    await updateDb((current) => {
+      const merged = new Map(current.recordings.map((record) => [record.id, record]));
+      for (const [id, record] of updates) merged.set(id, record);
+      current.recordings = [...merged.values()].sort(
+        (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+      );
+      if (current.connection) {
+        current.connection.lastSync = new Date().toISOString();
+        current.connection.updatedAt = new Date().toISOString();
+        if (client.workspaceId) current.connection.workspaceId = client.workspaceId;
+      }
+    });
+
+    await setSyncProgress({
+      status: result.errors.length ? "failed" : "completed",
+      stage: result.errors.length ? "failed" : "completed",
+      completed: remotes.length,
+      total: remotes.length,
+      newRecordings: result.newRecordings,
+      updatedRecordings: result.updatedRecordings,
+      skippedRecordings: result.skippedRecordings,
+      failedRecordings: result.errors.length,
+      currentRecordingId: null,
+      currentFilename: null,
+      errors: result.errors.slice(-5),
+      completedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    await setSyncProgress({
+      status: "failed",
+      stage: "failed",
+      currentRecordingId: null,
+      currentFilename: null,
+      errors: [error instanceof Error ? error.message : String(error)],
+      completedAt: new Date().toISOString()
+    });
+    throw error;
   }
-
-  await updateDb((current) => {
-    const merged = new Map(current.recordings.map((record) => [record.id, record]));
-    for (const [id, record] of updates) merged.set(id, record);
-    current.recordings = [...merged.values()].sort(
-      (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-    );
-    if (current.connection) {
-      current.connection.lastSync = new Date().toISOString();
-      current.connection.updatedAt = new Date().toISOString();
-      if (client.workspaceId) current.connection.workspaceId = client.workspaceId;
-    }
-  });
 
   return result;
 }

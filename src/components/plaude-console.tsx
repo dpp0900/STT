@@ -175,6 +175,25 @@ interface AutomationSettings {
   updatedAt: string | null;
 }
 
+interface SyncProgressState {
+  status: "idle" | "running" | "completed" | "failed";
+  stage: "idle" | "listing" | "downloading" | "completed" | "failed";
+  scope: "all" | "selected";
+  requested: number | null;
+  total: number;
+  completed: number;
+  newRecordings: number;
+  updatedRecordings: number;
+  skippedRecordings: number;
+  failedRecordings: number;
+  currentRecordingId: string | null;
+  currentFilename: string | null;
+  errors: string[];
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string | null;
+}
+
 interface OpenClawSettings {
   enabled: boolean;
   webhookUrl: string;
@@ -520,6 +539,57 @@ function progressDetailParts(progress: TranscriptionProgress): string[] {
   return parts;
 }
 
+function syncPercent(progress: SyncProgressState): number {
+  if (progress.status === "completed" || progress.stage === "completed") return 100;
+  if (progress.total > 0) {
+    return Math.min(100, Math.max(0, Math.round((progress.completed / progress.total) * 100)));
+  }
+  return progress.status === "running" ? 5 : 0;
+}
+
+function syncStageLabel(progress: SyncProgressState): string {
+  if (progress.status === "failed") return "Download failed";
+  if (progress.stage === "listing") return "Reading Plaud list";
+  if (progress.stage === "downloading") return "Downloading audio";
+  if (progress.stage === "completed") return "Download complete";
+  return "Download";
+}
+
+function syncDetailParts(progress: SyncProgressState): string[] {
+  const parts = [
+    `${progress.newRecordings + progress.updatedRecordings} saved`,
+    `${progress.skippedRecordings} skipped`
+  ];
+  if (progress.failedRecordings > 0) parts.push(`${progress.failedRecordings} failed`);
+  if (progress.scope === "selected" && progress.requested !== null) {
+    parts.push(`${progress.requested} selected`);
+  }
+  return parts;
+}
+
+function optimisticSyncProgress(ids: string[] | undefined, totalFallback: number): SyncProgressState {
+  const selected = ids?.length ? ids.length : null;
+  const now = new Date().toISOString();
+  return {
+    status: "running",
+    stage: "listing",
+    scope: selected ? "selected" : "all",
+    requested: selected,
+    total: selected ?? Math.max(0, totalFallback),
+    completed: 0,
+    newRecordings: 0,
+    updatedRecordings: 0,
+    skippedRecordings: 0,
+    failedRecordings: 0,
+    currentRecordingId: ids?.length === 1 ? ids[0] : null,
+    currentFilename: selected ? "Finding selected recordings" : "Finding recordings",
+    errors: [],
+    startedAt: now,
+    completedAt: null,
+    updatedAt: now
+  };
+}
+
 function MetricTile({
   label,
   value,
@@ -542,16 +612,20 @@ function RecordingBadges({
   downloaded,
   transcription,
   progress,
+  syncProgress,
   variantCount
 }: {
   downloaded: boolean;
   transcription?: TranscriptionState;
   progress?: TranscriptionProgress | null;
+  syncProgress?: SyncProgressState | null;
   variantCount: number;
 }) {
+  const syncing = syncProgress?.status === "running";
   return (
     <div className="row-status">
       <span className={downloaded ? "pill ok" : "pill"}>{downloaded ? "Local" : "Cloud"}</span>
+      {syncing && <span className="pill working">Downloading</span>}
       {transcription && (
         <span className={transcriptionPillClass(transcription.status)}>
           {transcriptionStatusLabel(transcription.status)}
@@ -559,6 +633,43 @@ function RecordingBadges({
       )}
       {progress && <span className="pill working">{progressStageLabel(progress.stage)}</span>}
       {variantCount > 1 && <span className="pill count">{variantCount} models</span>}
+    </div>
+  );
+}
+
+function SyncDownloadPanel({ progress }: { progress: SyncProgressState }) {
+  const percent = syncPercent(progress);
+  const detailParts = syncDetailParts(progress);
+  return (
+    <div className={`sync-progress-panel ${progress.status}`}>
+      <div className="sync-progress-icon">
+        {progress.status === "failed" ? <AlertCircle size={18} /> : <Download size={18} />}
+      </div>
+      <div className="sync-progress-main">
+        <div className="sync-progress-row">
+          <div>
+            <span>{syncStageLabel(progress)}</span>
+            <strong>{progress.currentFilename || "Preparing download"}</strong>
+          </div>
+          <em>
+            {progress.completed}/{progress.total || progress.requested || 0}
+          </em>
+        </div>
+        <div
+          className="progress-track sync-track"
+          role="progressbar"
+          aria-label="Plaud download progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
+          <span style={{ width: `${percent}%` }} />
+        </div>
+        <div className="sync-progress-details">{detailParts.join(" · ")}</div>
+        {progress.errors.length > 0 && (
+          <div className="sync-progress-error">{progress.errors[0]}</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1249,6 +1360,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const [openClawWebhookTokenInput, setOpenClawWebhookTokenInput] = useState("");
   const [sttSettings, setSttSettings] = useState<SttSettings | null>(null);
   const [automationSettings, setAutomationSettings] = useState<AutomationSettings | null>(null);
+  const [syncProgress, setSyncProgress] = useState<SyncProgressState | null>(null);
   const [openClawSettings, setOpenClawSettings] = useState<OpenClawSettings | null>(null);
   const [providerUsage, setProviderUsage] = useState<ProviderUsageState | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
@@ -1293,6 +1405,14 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     setAutomationSettings(payload.settings as AutomationSettings);
   }, []);
 
+  const loadSyncProgress = useCallback(async () => {
+    const response = await fetch("/api/plaud/sync", { cache: "no-store" });
+    const payload = await response.json();
+    redirectToLoginIfNeeded(response, payload);
+    if (!response.ok) throw new Error(apiErrorMessage(payload, "Failed to load sync progress"));
+    setSyncProgress(payload.syncProgress as SyncProgressState);
+  }, []);
+
   const loadOpenClawSettings = useCallback(async () => {
     const response = await fetch("/api/settings/openclaw", { cache: "no-store" });
     const payload = await response.json();
@@ -1327,6 +1447,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       await loadConnection();
       await loadSttSettings();
       await loadAutomationSettings();
+      await loadSyncProgress();
       await loadOpenClawSettings();
       await loadRecordings();
     } catch (error) {
@@ -1342,6 +1463,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     loadConnection,
     loadOpenClawSettings,
     loadRecordings,
+    loadSyncProgress,
     loadSttSettings
   ]);
 
@@ -1428,6 +1550,11 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     busy === "transcribe" ||
     busy === "cleanup" ||
     Boolean(busy?.startsWith("transcribe:") || busy?.startsWith("cleanup:"));
+  const syncOperationInFlight = busy === "sync" || Boolean(busy?.startsWith("sync:"));
+  const visibleSyncProgress =
+    syncProgress && (syncProgress.status === "running" || syncOperationInFlight)
+      ? syncProgress
+      : null;
   const progressPollMs =
     hasRunningCleanup || busy === "cleanup" || Boolean(busy?.startsWith("cleanup:")) ? 750 : 1500;
 
@@ -1458,6 +1585,28 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       window.clearInterval(id);
     };
   }, [hasRunningWork, loadRecordings, operationInFlight, progressPollMs]);
+
+  useEffect(() => {
+    if (!syncOperationInFlight && syncProgress?.status !== "running") return;
+
+    let cancelled = false;
+    const refreshSyncProgress = async () => {
+      try {
+        await loadSyncProgress();
+      } catch {
+        // The sync action itself surfaces failures; progress polling stays quiet.
+      }
+    };
+    void refreshSyncProgress();
+    const id = window.setInterval(() => {
+      if (!cancelled) void refreshSyncProgress();
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [loadSyncProgress, syncOperationInFlight, syncProgress?.status]);
 
   useEffect(() => {
     if (!automationSettings?.autoSyncEnabled && !automationSettings?.autoTranscribeEnabled) return;
@@ -1646,6 +1795,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
 
   const sync = async (ids?: string[]) => {
     setBusy(ids?.length === 1 ? `sync:${ids[0]}` : "sync");
+    setSyncProgress(optimisticSyncProgress(ids, recordings.total || allRows.length));
     setNotice(null);
     try {
       const response = await fetch("/api/plaud/sync", {
@@ -1655,6 +1805,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(apiErrorMessage(body, "Sync failed"));
+      if (body.syncProgress) setSyncProgress(body.syncProgress as SyncProgressState);
       setNotice({
         type: body.errors?.length ? "error" : "ok",
         text: `Synced ${body.newRecordings + body.updatedRecordings} recording(s), skipped ${body.skippedRecordings}.`
@@ -1662,6 +1813,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       setSelected(new Set());
       await refreshAll();
     } catch (error) {
+      void loadSyncProgress();
       setNotice({
         type: "error",
         text: error instanceof Error ? error.message : "Sync failed"
@@ -2393,6 +2545,9 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                       downloaded={detailRecording.downloaded}
                       transcription={detailVariants[0]}
                       progress={detailProgress}
+                      syncProgress={
+                        syncProgress?.currentRecordingId === detailRecording.id ? syncProgress : null
+                      }
                       variantCount={detailVariants.length}
                     />
                   </div>
@@ -2457,6 +2612,8 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                   </button>
                 </div>
               </div>
+
+              {visibleSyncProgress && <SyncDownloadPanel progress={visibleSyncProgress} />}
 
               <div className="detail-body">
                 <section className="detail-summary">
@@ -2570,6 +2727,8 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                 </div>
               </div>
 
+              {visibleSyncProgress && <SyncDownloadPanel progress={visibleSyncProgress} />}
+
               <div className="recording-list">
                 {allRows.length === 0 ? (
                   <div className="empty-state">
@@ -2585,6 +2744,8 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     const variants = transcriptionVariants(recording);
                     const latestTranscript = variants[0];
                     const progressState = activeProgress(latestTranscript);
+                    const rowSyncProgress =
+                      syncProgress?.currentRecordingId === recording.id ? syncProgress : null;
 
                     return (
                       <article
@@ -2609,6 +2770,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                               downloaded={recording.downloaded}
                               transcription={latestTranscript}
                               progress={progressState}
+                              syncProgress={rowSyncProgress}
                               variantCount={variants.length}
                             />
                           </div>
