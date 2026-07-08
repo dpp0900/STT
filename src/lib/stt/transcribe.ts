@@ -20,6 +20,7 @@ import { transcribeFileWithSoniox } from "@/lib/stt/soniox";
 
 const DEFAULT_CLEANUP_RECORDING_CONCURRENCY = 2;
 const MAX_CLEANUP_RECORDING_CONCURRENCY = 3;
+const CLEANUP_FAILURE_WARNING_PREFIX = "Transcript cleanup failed:";
 
 export interface RunTranscriptionResult {
   recordingId: string;
@@ -152,6 +153,12 @@ function newRunningPostprocessState(
     completedAt: null,
     updatedAt: new Date().toISOString()
   };
+}
+
+function withoutCleanupFailureWarnings(warnings: string[] | undefined): string[] {
+  return (warnings ?? []).filter(
+    (warning) => !warning.startsWith(CLEANUP_FAILURE_WARNING_PREFIX)
+  );
 }
 
 async function setRecordingTranscription(
@@ -332,6 +339,7 @@ async function runPostprocessForModel(
     const state = transcriptionForModel(item, transcriptionModel);
     if (!state) return;
     state.postprocess = newRunningPostprocessState(state.postprocess, postprocessModel);
+    state.warnings = withoutCleanupFailureWarnings(state.warnings);
     state.updatedAt = new Date().toISOString();
     setTranscriptionForModel(item, transcriptionModel, state);
   });
@@ -390,6 +398,7 @@ async function runPostprocessForModel(
         completedAt: now,
         updatedAt: now
       };
+      state.warnings = withoutCleanupFailureWarnings(state.warnings);
       state.updatedAt = now;
       setTranscriptionForModel(item, transcriptionModel, state);
     });
@@ -424,7 +433,12 @@ async function runPostprocessForModel(
         completedAt: now,
         updatedAt: now
       };
-      state.warnings = [...new Set([...state.warnings, `Transcript cleanup failed: ${message}`])];
+      state.warnings = [
+        ...new Set([
+          ...withoutCleanupFailureWarnings(state.warnings),
+          `${CLEANUP_FAILURE_WARNING_PREFIX} ${message}`
+        ])
+      ];
       state.updatedAt = now;
       setTranscriptionForModel(item, transcriptionModel, state);
     });
