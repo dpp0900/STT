@@ -779,6 +779,7 @@ button:disabled {
 }
 
 .automation-settings,
+.openclaw-settings,
 .stt-settings {
   display: grid;
   gap: 10px;
@@ -788,6 +789,9 @@ button:disabled {
 .manual-connect select,
 .oauth-connect input,
 .automation-settings input,
+.openclaw-settings input,
+.openclaw-settings select,
+.openclaw-settings textarea,
 .stt-settings input,
 .stt-settings select {
   width: 100%;
@@ -809,10 +813,21 @@ button:disabled {
 .manual-connect select,
 .oauth-connect input,
 .automation-settings input,
+.openclaw-settings input,
+.openclaw-settings select,
 .stt-settings input,
 .stt-settings select {
   min-height: 38px;
   padding: 0 10px;
+}
+
+.openclaw-settings textarea {
+  min-height: 148px;
+  resize: vertical;
+  padding: 10px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .settings-grid {
@@ -1354,6 +1369,21 @@ code {
 }
 
 .provider-chip.cleanup.failed {
+  background: #fff1ed;
+  color: var(--danger);
+}
+
+.provider-chip.openclaw {
+  background: #e8f7f5;
+  color: #23635d;
+}
+
+.provider-chip.openclaw.pending {
+  background: #eef2ff;
+  color: #354795;
+}
+
+.provider-chip.openclaw.failed {
   background: #fff1ed;
   color: var(--danger);
 }

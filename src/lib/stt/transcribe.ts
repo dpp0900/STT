@@ -11,6 +11,7 @@ import {
   type TranscriptionUsage
 } from "@/lib/db";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { notifyOpenClawForCompletedTranscription } from "@/lib/openclaw";
 import { getAudioFilePath } from "@/lib/storage";
 import { chunkAudioFile } from "@/lib/stt/chunk-audio";
 import { transcribeChunkWithDeepgram } from "@/lib/stt/deepgram";
@@ -473,6 +474,7 @@ export async function runTranscriptCleanupForRecording(
     force: true,
     throwOnFailure: true
   });
+  await notifyOpenClawForCompletedTranscription(recordingId, target.model);
 
   const refreshed = await readDb();
   const completed = refreshed.recordings.find((item) => item.id === recordingId);
@@ -613,6 +615,7 @@ export async function runTranscriptionForRecording(
     }
 
     await runPostprocessForModel(recordingId, settings.model, settings);
+    await notifyOpenClawForCompletedTranscription(recordingId, settings.model);
 
     const refreshed = await readDb();
     const completed = refreshed.recordings.find((item) => item.id === recordingId);
@@ -763,6 +766,7 @@ export async function runTranscriptionForRecording(
   });
 
   await runPostprocessForModel(recordingId, settings.model, settings);
+  await notifyOpenClawForCompletedTranscription(recordingId, settings.model);
 
   const refreshed = await readDb();
   const completed = refreshed.recordings.find((item) => item.id === recordingId);

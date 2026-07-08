@@ -150,6 +150,35 @@ Automation can be enabled from Settings. Auto sync periodically downloads Plaud
 recordings on the server, and auto transcription processes newly downloaded local
 audio for the currently selected STT model with a configurable per-run batch size.
 
+## OpenClaw Auto-send
+
+The app can send the final transcript to OpenClaw after STT completes and LLM
+cleanup succeeds. It calls OpenClaw's hook agent endpoint, usually:
+
+```text
+http://host.docker.internal:18789/hooks/agent
+```
+
+Enable OpenClaw hooks in the OpenClaw Gateway config with a dedicated hook token,
+then paste that URL and token in this app's Settings -> OpenClaw. In Docker,
+`docker-compose.yml` maps `host.docker.internal` to the Ubuntu host gateway so a
+container can reach a Gateway running on the host.
+
+Optional env overrides:
+
+```bash
+OPENCLAW_ENABLED=true
+OPENCLAW_WEBHOOK_URL=http://host.docker.internal:18789/hooks/agent
+OPENCLAW_HOOK_TOKEN=<shared hook token>
+OPENCLAW_MODEL=
+OPENCLAW_THINKING=
+OPENCLAW_DELIVER=false
+```
+
+OpenClaw sends use an idempotency key derived from the recording, STT model, and
+final transcript hash. If cleanup is enabled and fails, the transcript is not
+sent; after a successful cleanup retry, it is sent automatically.
+
 ## Notes
 
 This project reimplements the Plaud connection and sync flow used by

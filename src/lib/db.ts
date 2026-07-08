@@ -89,6 +89,16 @@ export interface TranscriptionProgress {
   charsPerSecond?: number;
 }
 
+export interface OpenClawDeliveryState {
+  status: "pending" | "sent" | "failed" | "skipped";
+  webhookUrl: string | null;
+  idempotencyKey: string | null;
+  transcriptHash: string | null;
+  error?: string;
+  sentAt: string | null;
+  updatedAt: string;
+}
+
 export interface TranscriptionChunk {
   index: number;
   startSeconds: number;
@@ -137,6 +147,7 @@ export interface TranscriptionState {
   chunks: TranscriptionChunk[];
   progress?: TranscriptionProgress;
   postprocess?: TranscriptionPostprocessState;
+  openClaw?: OpenClawDeliveryState | null;
   usage?: TranscriptionUsage;
   warnings: string[];
   error?: string;
@@ -145,11 +156,24 @@ export interface TranscriptionState {
   updatedAt: string;
 }
 
+export interface OpenClawSettings {
+  enabled: boolean;
+  webhookUrl: string;
+  encryptedWebhookToken: string | null;
+  agentName: string;
+  model: string;
+  thinking: string;
+  deliver: boolean;
+  promptTemplate: string;
+  updatedAt: string | null;
+}
+
 export interface PlaudeDb {
   connection: PlaudConnection | null;
   recordings: LocalRecording[];
   sttSettings: SttSettings;
   automationSettings: AutomationSettings;
+  openClawSettings: OpenClawSettings;
 }
 
 export const DEFAULT_STT_MODEL = "openai/whisper-large-v3-turbo";
@@ -164,6 +188,20 @@ export const DEFAULT_AUTOMATION_INTERVAL_MINUTES = 15;
 export const MIN_AUTOMATION_TRANSCRIBE_BATCH_SIZE = 1;
 export const MAX_AUTOMATION_TRANSCRIBE_BATCH_SIZE = 20;
 export const DEFAULT_AUTOMATION_TRANSCRIBE_BATCH_SIZE = 3;
+export const DEFAULT_OPENCLAW_WEBHOOK_URL =
+  "http://host.docker.internal:18789/hooks/agent";
+export const DEFAULT_OPENCLAW_PROMPT_TEMPLATE = [
+  "Plaud transcription completed.",
+  "",
+  "Recording: {{filename}}",
+  "Started at: {{startTime}}",
+  "Duration: {{duration}}",
+  "STT model: {{model}}",
+  "Cleanup model: {{cleanupModel}}",
+  "",
+  "Transcript:",
+  "{{transcript}}"
+].join("\n");
 
 export const STT_MODEL_PRESETS = [
   {
@@ -273,11 +311,26 @@ export function defaultAutomationSettings(): AutomationSettings {
   };
 }
 
+export function defaultOpenClawSettings(): OpenClawSettings {
+  return {
+    enabled: false,
+    webhookUrl: DEFAULT_OPENCLAW_WEBHOOK_URL,
+    encryptedWebhookToken: null,
+    agentName: "Plaud transcript",
+    model: "",
+    thinking: "",
+    deliver: false,
+    promptTemplate: DEFAULT_OPENCLAW_PROMPT_TEMPLATE,
+    updatedAt: null
+  };
+}
+
 const EMPTY_DB: PlaudeDb = {
   connection: null,
   recordings: [],
   sttSettings: defaultSttSettings(),
-  automationSettings: defaultAutomationSettings()
+  automationSettings: defaultAutomationSettings(),
+  openClawSettings: defaultOpenClawSettings()
 };
 
 let writeLock: Promise<unknown> = Promise.resolve();
@@ -362,6 +415,47 @@ function normalizeAutomationSettings(
   };
 }
 
+function normalizeOpenClawSettings(
+  settings: Partial<OpenClawSettings> | undefined
+): OpenClawSettings {
+  const defaults = defaultOpenClawSettings();
+  const merged = {
+    ...defaults,
+    ...(settings ?? {})
+  };
+  return {
+    ...merged,
+    enabled:
+      typeof merged.enabled === "boolean" ? merged.enabled : defaults.enabled,
+    webhookUrl:
+      typeof merged.webhookUrl === "string" && merged.webhookUrl.trim()
+        ? merged.webhookUrl.trim()
+        : defaults.webhookUrl,
+    encryptedWebhookToken:
+      typeof merged.encryptedWebhookToken === "string" &&
+      merged.encryptedWebhookToken.trim()
+        ? merged.encryptedWebhookToken
+        : null,
+    agentName:
+      typeof merged.agentName === "string" && merged.agentName.trim()
+        ? merged.agentName.trim()
+        : defaults.agentName,
+    model:
+      typeof merged.model === "string" ? merged.model.trim() : defaults.model,
+    thinking:
+      typeof merged.thinking === "string"
+        ? merged.thinking.trim()
+        : defaults.thinking,
+    deliver:
+      typeof merged.deliver === "boolean" ? merged.deliver : defaults.deliver,
+    promptTemplate:
+      typeof merged.promptTemplate === "string" && merged.promptTemplate.trim()
+        ? merged.promptTemplate
+        : defaults.promptTemplate,
+    updatedAt: typeof merged.updatedAt === "string" ? merged.updatedAt : null
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -420,7 +514,8 @@ export async function readDb(): Promise<PlaudeDb> {
         ? parsed.recordings.map((recording) => normalizeRecording(recording))
         : [],
       sttSettings: normalizeSttSettings(parsed.sttSettings),
-      automationSettings: normalizeAutomationSettings(parsed.automationSettings)
+      automationSettings: normalizeAutomationSettings(parsed.automationSettings),
+      openClawSettings: normalizeOpenClawSettings(parsed.openClawSettings)
     };
   } catch {
     return structuredClone(EMPTY_DB);

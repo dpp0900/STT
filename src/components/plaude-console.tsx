@@ -104,9 +104,20 @@ interface TranscriptionState {
   progress?: TranscriptionProgress;
   warnings: string[];
   postprocess?: TranscriptionPostprocessState;
+  openClaw?: OpenClawDeliveryState | null;
   error?: string;
   startedAt: string | null;
   completedAt: string | null;
+  updatedAt: string;
+}
+
+interface OpenClawDeliveryState {
+  status: "pending" | "sent" | "failed" | "skipped";
+  webhookUrl: string | null;
+  idempotencyKey: string | null;
+  transcriptHash: string | null;
+  error?: string;
+  sentAt: string | null;
   updatedAt: string;
 }
 
@@ -161,6 +172,20 @@ interface AutomationSettings {
   lastRunStartedAt: string | null;
   lastRunCompletedAt: string | null;
   lastRunMessage: string | null;
+  updatedAt: string | null;
+}
+
+interface OpenClawSettings {
+  enabled: boolean;
+  webhookUrl: string;
+  hasWebhookToken: boolean;
+  envWebhookUrl: boolean;
+  envWebhookToken: boolean;
+  agentName: string;
+  model: string;
+  thinking: string;
+  deliver: boolean;
+  promptTemplate: string;
   updatedAt: string | null;
 }
 
@@ -368,6 +393,20 @@ function postprocessStatusLabel(status: TranscriptionPostprocessState["status"])
     case "idle":
     default:
       return "Cleanup queued";
+  }
+}
+
+function openClawStatusLabel(status: OpenClawDeliveryState["status"]): string {
+  switch (status) {
+    case "sent":
+      return "OpenClaw sent";
+    case "pending":
+      return "OpenClaw sending";
+    case "failed":
+      return "OpenClaw failed";
+    case "skipped":
+    default:
+      return "OpenClaw skipped";
   }
 }
 
@@ -804,6 +843,147 @@ function AutomationSettingsCard({
   );
 }
 
+function OpenClawSettingsCard({
+  settings,
+  webhookTokenInput,
+  onWebhookTokenInputChange,
+  onChange,
+  onSave,
+  saving,
+  disabled
+}: {
+  settings: OpenClawSettings;
+  webhookTokenInput: string;
+  onWebhookTokenInputChange: (value: string) => void;
+  onChange: (settings: OpenClawSettings) => void;
+  onSave: () => void;
+  saving: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <section className="settings-card openclaw-settings">
+      <div className="section-heading compact">
+        <div className="section-title">
+          <PlugZap size={18} />
+          <span>OpenClaw</span>
+        </div>
+        <span className={`key-status ${settings.enabled ? "ready" : ""}`}>
+          {settings.enabled ? "enabled" : "off"}
+        </span>
+      </div>
+
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={settings.enabled}
+          onChange={(event) =>
+            onChange({ ...settings, enabled: event.target.checked })
+          }
+        />
+        <span>
+          <strong>Auto-send completed transcripts</strong>
+          <small>Send the final cleaned transcript to OpenClaw through its hook agent endpoint.</small>
+        </span>
+      </label>
+
+      <input
+        value={settings.webhookUrl}
+        onChange={(event) =>
+          onChange({ ...settings, webhookUrl: event.target.value })
+        }
+        placeholder="http://host.docker.internal:18789/hooks/agent"
+        aria-label="OpenClaw webhook URL"
+        disabled={settings.envWebhookUrl}
+        spellCheck={false}
+      />
+      <input
+        value={webhookTokenInput}
+        onChange={(event) => onWebhookTokenInputChange(event.target.value)}
+        type="password"
+        placeholder={
+          settings.hasWebhookToken ? "OpenClaw hook token saved" : "OpenClaw hook token"
+        }
+        aria-label="OpenClaw hook token"
+        disabled={settings.envWebhookToken}
+        spellCheck={false}
+      />
+      <input
+        value={settings.agentName}
+        onChange={(event) =>
+          onChange({ ...settings, agentName: event.target.value })
+        }
+        placeholder="Plaud transcript"
+        aria-label="OpenClaw run name"
+      />
+      <div className="settings-grid">
+        <label>
+          <span>Model</span>
+          <input
+            value={settings.model}
+            onChange={(event) =>
+              onChange({ ...settings, model: event.target.value })
+            }
+            placeholder="OpenClaw default"
+            aria-label="OpenClaw model"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          <span>Thinking</span>
+          <select
+            value={settings.thinking}
+            onChange={(event) =>
+              onChange({ ...settings, thinking: event.target.value })
+            }
+            aria-label="OpenClaw thinking"
+          >
+            <option value="">Default</option>
+            <option value="off">Off</option>
+            <option value="minimal">Minimal</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="xhigh">XHigh</option>
+          </select>
+        </label>
+      </div>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={settings.deliver}
+          onChange={(event) =>
+            onChange({ ...settings, deliver: event.target.checked })
+          }
+        />
+        <span>
+          <strong>Let OpenClaw deliver the final reply</strong>
+          <small>Leave off if OpenClaw should only create an internal agent run.</small>
+        </span>
+      </label>
+      <textarea
+        value={settings.promptTemplate}
+        onChange={(event) =>
+          onChange({ ...settings, promptTemplate: event.target.value })
+        }
+        aria-label="OpenClaw prompt template"
+        spellCheck={false}
+      />
+      <p className="preset-description">
+        Placeholders: {"{{filename}}"}, {"{{startTime}}"}, {"{{duration}}"}, {"{{model}}"}, {"{{cleanupModel}}"}, {"{{transcript}}"}.
+      </p>
+      <button
+        className="secondary-button full-width"
+        type="button"
+        onClick={onSave}
+        disabled={disabled || saving}
+      >
+        {saving ? <Loader2 className="spin" size={17} /> : <Settings size={17} />}
+        <span>Save OpenClaw</span>
+      </button>
+    </section>
+  );
+}
+
 interface SpeakerTurn {
   index: number;
   start: string;
@@ -958,6 +1138,11 @@ function TranscriptStack({
                       {postprocessStatusLabel(postprocess.status)}
                     </span>
                   )}
+                  {transcript.openClaw && (
+                    <span className={`provider-chip openclaw ${transcript.openClaw.status}`}>
+                      {openClawStatusLabel(transcript.openClaw.status)}
+                    </span>
+                  )}
                 </div>
                 <span>{transcriptionStatusLabel(transcript.status)}</span>
               </div>
@@ -1014,6 +1199,9 @@ function TranscriptStack({
               <span>{transcript.model}</span>
               <span>{provider === "soniox" ? "full file" : `${transcript.chunks.length} chunks`}</span>
               {postprocess && <span>cleanup: {postprocess.model}</span>}
+              {transcript.openClaw?.sentAt && (
+                <span>openclaw: {formatDate(transcript.openClaw.sentAt)}</span>
+              )}
               {cleaned && <span>{showingRaw ? "raw view" : "cleaned view"}</span>}
               {speakerTurns.length >= 3 && <span>{speakerTurns.length.toLocaleString()} turns</span>}
               <span>{text.length.toLocaleString()} chars</span>
@@ -1027,6 +1215,9 @@ function TranscriptStack({
             ) : null}
             {postprocess?.error && (
               <div className="transcript-warning">{postprocess.error}</div>
+            )}
+            {transcript.openClaw?.status === "failed" && transcript.openClaw.error && (
+              <div className="transcript-warning">{transcript.openClaw.error}</div>
             )}
             {transcriptOpen ? (
               <TranscriptContent text={text} speakerTurns={speakerTurns} />
@@ -1055,12 +1246,15 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [deepgramApiKeyInput, setDeepgramApiKeyInput] = useState("");
   const [sonioxApiKeyInput, setSonioxApiKeyInput] = useState("");
+  const [openClawWebhookTokenInput, setOpenClawWebhookTokenInput] = useState("");
   const [sttSettings, setSttSettings] = useState<SttSettings | null>(null);
   const [automationSettings, setAutomationSettings] = useState<AutomationSettings | null>(null);
+  const [openClawSettings, setOpenClawSettings] = useState<OpenClawSettings | null>(null);
   const [providerUsage, setProviderUsage] = useState<ProviderUsageState | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [automationSaving, setAutomationSaving] = useState(false);
   const [automationRunning, setAutomationRunning] = useState(false);
+  const [openClawSaving, setOpenClawSaving] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailRecordingId, setDetailRecordingId] = useState<string | null>(null);
   const [expandedTranscripts, setExpandedTranscripts] = useState<Set<string>>(new Set());
@@ -1099,6 +1293,14 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     setAutomationSettings(payload.settings as AutomationSettings);
   }, []);
 
+  const loadOpenClawSettings = useCallback(async () => {
+    const response = await fetch("/api/settings/openclaw", { cache: "no-store" });
+    const payload = await response.json();
+    redirectToLoginIfNeeded(response, payload);
+    if (!response.ok) throw new Error(apiErrorMessage(payload, "Failed to load OpenClaw settings"));
+    setOpenClawSettings(payload.settings as OpenClawSettings);
+  }, []);
+
   const loadProviderUsage = useCallback(async () => {
     setUsageLoading(true);
     try {
@@ -1125,6 +1327,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       await loadConnection();
       await loadSttSettings();
       await loadAutomationSettings();
+      await loadOpenClawSettings();
       await loadRecordings();
     } catch (error) {
       setNotice({
@@ -1134,7 +1337,13 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     } finally {
       setBusy(null);
     }
-  }, [loadAutomationSettings, loadConnection, loadRecordings, loadSttSettings]);
+  }, [
+    loadAutomationSettings,
+    loadConnection,
+    loadOpenClawSettings,
+    loadRecordings,
+    loadSttSettings
+  ]);
 
   useEffect(() => {
     void refreshAll();
@@ -1188,7 +1397,8 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     if (!settingsOpen) return;
     void loadProviderUsage();
     void loadAutomationSettings();
-  }, [loadAutomationSettings, loadProviderUsage, settingsOpen]);
+    void loadOpenClawSettings();
+  }, [loadAutomationSettings, loadOpenClawSettings, loadProviderUsage, settingsOpen]);
 
   const allRows = useMemo(
     () => [...recordings.recordings, ...recordings.localOnly].sort(compareRecordingTime),
@@ -1570,6 +1780,40 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     }
   };
 
+  const saveOpenClawSettings = async () => {
+    if (!openClawSettings) return;
+    setOpenClawSaving(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/settings/openclaw", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: openClawSettings.enabled,
+          webhookUrl: openClawSettings.webhookUrl,
+          webhookToken: openClawWebhookTokenInput.trim() || undefined,
+          agentName: openClawSettings.agentName,
+          model: openClawSettings.model,
+          thinking: openClawSettings.thinking,
+          deliver: openClawSettings.deliver,
+          promptTemplate: openClawSettings.promptTemplate
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(apiErrorMessage(body, "Failed to save OpenClaw settings"));
+      setOpenClawSettings(body.settings as OpenClawSettings);
+      setOpenClawWebhookTokenInput("");
+      setNotice({ type: "ok", text: "OpenClaw settings saved." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to save OpenClaw settings"
+      });
+    } finally {
+      setOpenClawSaving(false);
+    }
+  };
+
   const runAutomationNow = async () => {
     setAutomationRunning(true);
     setNotice(null);
@@ -1912,6 +2156,18 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                   onRunNow={() => void runAutomationNow()}
                   saving={automationSaving}
                   running={automationRunning}
+                  disabled={busy !== null}
+                />
+              )}
+
+              {openClawSettings && (
+                <OpenClawSettingsCard
+                  settings={openClawSettings}
+                  webhookTokenInput={openClawWebhookTokenInput}
+                  onWebhookTokenInputChange={setOpenClawWebhookTokenInput}
+                  onChange={setOpenClawSettings}
+                  onSave={() => void saveOpenClawSettings()}
+                  saving={openClawSaving}
                   disabled={busy !== null}
                 />
               )}
