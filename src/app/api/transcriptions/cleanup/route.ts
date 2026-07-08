@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { AppError, ErrorCode, errorBody, normalizeError } from "@/lib/errors";
-import { runTranscriptCleanups } from "@/lib/stt/transcribe";
+import { startTranscriptCleanupJobs } from "@/lib/stt/cleanup-jobs";
 
 export async function POST(request: Request) {
   try {
@@ -24,8 +24,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const results = await runTranscriptCleanups(recordingIds);
-    return NextResponse.json({ success: true, results });
+    const results = await startTranscriptCleanupJobs(recordingIds);
+    return NextResponse.json({ success: true, results }, { status: 202 });
   } catch (error) {
     const normalized = normalizeError(error);
     return NextResponse.json(errorBody(normalized), {

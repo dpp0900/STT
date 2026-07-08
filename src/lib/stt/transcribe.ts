@@ -22,6 +22,8 @@ import { transcribeFileWithSoniox } from "@/lib/stt/soniox";
 const DEFAULT_CLEANUP_RECORDING_CONCURRENCY = 2;
 const MAX_CLEANUP_RECORDING_CONCURRENCY = 3;
 const CLEANUP_FAILURE_WARNING_PREFIX = "Transcript cleanup failed:";
+const INTERRUPTED_CLEANUP_MESSAGE =
+  "Transcript cleanup was interrupted by a server restart or disconnected worker. Start cleanup again.";
 
 export interface RunTranscriptionResult {
   recordingId: string;
@@ -340,6 +342,95 @@ function latestCompletedTranscription(recording: LocalRecording): TranscriptionS
   );
 }
 
+function cleanupTargetFromRecording(
+  recording: LocalRecording,
+  model?: string
+): TranscriptionState | null {
+  return model?.trim()
+    ? transcriptionForModel(recording, model.trim())
+    : latestCompletedTranscription(recording);
+}
+
+export async function resolveTranscriptCleanupTarget(
+  recordingId: string,
+  model?: string
+): Promise<{ recordingId: string; model: string }> {
+  const db = await readDb();
+  const recording = db.recordings.find((item) => item.id === recordingId);
+  if (!recording) {
+    throw new AppError(ErrorCode.NotFound, "Recording not found.", 404);
+  }
+
+  const target = cleanupTargetFromRecording(recording, model);
+  if (!target) {
+    throw new AppError(
+      ErrorCode.InvalidInput,
+      "No completed transcript is available for cleanup.",
+      400
+    );
+  }
+
+  return { recordingId, model: target.model };
+}
+
+export async function markTranscriptCleanupRunning(
+  recordingId: string,
+  model: string
+): Promise<void> {
+  const db = await readDb();
+  const postprocessModel = effectivePostprocessModel(db.sttSettings);
+  await setRecordingTranscription(recordingId, (item) => {
+    const state = transcriptionForModel(item, model);
+    if (!state) return;
+    state.postprocess = newRunningPostprocessState(state.postprocess, postprocessModel);
+    state.warnings = withoutCleanupFailureWarnings(state.warnings);
+    state.updatedAt = new Date().toISOString();
+    setTranscriptionForModel(item, model, state);
+  });
+}
+
+export async function recoverInterruptedCleanupJobs(): Promise<number> {
+  let recovered = 0;
+  const now = new Date().toISOString();
+  await updateDb((db) => {
+    for (const recording of db.recordings) {
+      const transcriptions = { ...(recording.transcriptions ?? {}) };
+      if (recording.transcription?.model) {
+        transcriptions[recording.transcription.model] = recording.transcription;
+      }
+
+      for (const [model, state] of Object.entries(transcriptions)) {
+        if (state.postprocess?.status !== "running") continue;
+        state.postprocess = {
+          ...state.postprocess,
+          status: "failed",
+          error: INTERRUPTED_CLEANUP_MESSAGE,
+          warnings: [
+            ...new Set([
+              ...(state.postprocess.warnings ?? []),
+              INTERRUPTED_CLEANUP_MESSAGE
+            ])
+          ],
+          completedAt: now,
+          updatedAt: now
+        };
+        state.warnings = [
+          ...new Set([
+            ...withoutCleanupFailureWarnings(state.warnings),
+            `${CLEANUP_FAILURE_WARNING_PREFIX} ${INTERRUPTED_CLEANUP_MESSAGE}`
+          ])
+        ];
+        state.updatedAt = now;
+        transcriptions[model] = state;
+        if (recording.transcription?.model === model) recording.transcription = state;
+        recovered += 1;
+      }
+      recording.transcriptions = transcriptions;
+    }
+  });
+  return recovered;
+}
+
 async function runPostprocessForModel(
   recordingId: string,
   transcriptionModel: string,
@@ -497,9 +588,7 @@ export async function runTranscriptCleanupForRecording(
     throw new AppError(ErrorCode.NotFound, "Recording not found.", 404);
   }
 
-  const target = model?.trim()
-    ? transcriptionForModel(recording, model.trim())
-    : latestCompletedTranscription(recording);
+  const target = cleanupTargetFromRecording(recording, model);
 
   if (!target) {
     throw new AppError(

@@ -465,6 +465,45 @@ function compareRecordingTime(left: RecordingRow, right: RecordingRow): number {
   return left.filename.localeCompare(right.filename);
 }
 
+function mergeLocalRecordingState(current: RecordingsState, localState: RecordingsState): RecordingsState {
+  if (current.recordings.length === 0 && current.localOnly.length === 0) {
+    return localState;
+  }
+
+  const localRows = [...localState.recordings, ...localState.localOnly];
+  const localById = new Map(localRows.map((row) => [row.id, row]));
+  const seen = new Set<string>();
+  const mergeRow = (row: RecordingRow): RecordingRow => {
+    seen.add(row.id);
+    const local = localById.get(row.id);
+    if (!local) return row;
+    return {
+      ...row,
+      downloaded: local.downloaded,
+      downloadedAt: local.downloadedAt,
+      audioUrl: local.audioUrl,
+      transcription: local.transcription,
+      transcriptions: local.transcriptions ?? {}
+    };
+  };
+
+  const recordings = current.recordings.map(mergeRow);
+  const localOnly = current.localOnly.map(mergeRow);
+  for (const local of localRows.sort(compareRecordingTime)) {
+    if (seen.has(local.id)) continue;
+    seen.add(local.id);
+    localOnly.push(local);
+  }
+
+  return {
+    ...current,
+    connected: localState.connected,
+    total: current.total || localState.total,
+    recordings,
+    localOnly: localOnly.sort(compareRecordingTime)
+  };
+}
+
 function latestTranscriptionFirst(left: TranscriptionState, right: TranscriptionState): number {
   const leftTime = Date.parse(left.updatedAt);
   const rightTime = Date.parse(right.updatedAt);
@@ -1231,6 +1270,7 @@ function TranscriptStack({
   sttSettings,
   expandedTranscripts,
   rawTranscriptViews,
+  cleanupReady,
   toggleTranscript,
   setTranscriptView,
   copyTranscript,
@@ -1243,6 +1283,7 @@ function TranscriptStack({
   sttSettings: SttSettings | null;
   expandedTranscripts: Set<string>;
   rawTranscriptViews: Set<string>;
+  cleanupReady: boolean;
   toggleTranscript: (id: string) => void;
   setTranscriptView: (id: string, view: "cleaned" | "raw") => void;
   copyTranscript: (text: string) => Promise<void>;
@@ -1329,10 +1370,21 @@ function TranscriptStack({
                   type="button"
                   className="text-button"
                   onClick={() => cleanupTranscript(recordingId, transcript.model)}
-                  disabled={busy !== null || !sttSettings?.hasApiKey || transcript.status !== "completed"}
+                  disabled={
+                    busy !== null ||
+                    !cleanupReady ||
+                    transcript.status !== "completed" ||
+                    postprocess?.status === "running"
+                  }
                 >
                   {cleanupBusy ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}
-                  <span>{postprocess?.status === "completed" ? "Clean again" : "Clean"}</span>
+                  <span>
+                    {postprocess?.status === "running"
+                      ? "Cleaning"
+                      : postprocess?.status === "completed"
+                        ? "Clean again"
+                        : "Clean"}
+                  </span>
                 </button>
                 {transcript.openClaw?.status === "failed" && (
                   <button
@@ -1432,12 +1484,19 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     setConnection(payload);
   }, []);
 
-  const loadRecordings = useCallback(async () => {
-    const response = await fetch("/api/plaud/recordings?limit=200", { cache: "no-store" });
+  const loadRecordings = useCallback(async (options: { remote?: boolean } = {}) => {
+    const includeRemote = options.remote !== false;
+    const response = await fetch(
+      `/api/plaud/recordings?limit=200${includeRemote ? "" : "&remote=false"}`,
+      { cache: "no-store" }
+    );
     const payload = await response.json();
     redirectToLoginIfNeeded(response, payload);
     if (!response.ok) throw new Error(apiErrorMessage(payload, "Failed to load recordings"));
-    setRecordings(payload as RecordingsState);
+    const next = payload as RecordingsState;
+    setRecordings((current) =>
+      includeRemote ? next : mergeLocalRecordingState(current, next)
+    );
   }, []);
 
   const loadSttSettings = useCallback(async () => {
@@ -1583,7 +1642,10 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   );
   const detailVariants = detailRecording ? transcriptionVariants(detailRecording) : [];
   const detailCleanupTarget = detailVariants.find(
-    (item) => item.status === "completed" && item.text.trim()
+    (item) =>
+      item.status === "completed" &&
+      item.text.trim() &&
+      item.postprocess?.status !== "running"
   );
   const detailProgress = detailVariants.reduce<TranscriptionProgress | null>(
     (found, item) => found ?? activeProgress(item),
@@ -1621,7 +1683,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     let cancelled = false;
     const refreshProgress = async () => {
       try {
-        await loadRecordings();
+        await loadRecordings({ remote: false });
       } catch {
         // Keep progress polling quiet; the primary action still reports failures.
       }
@@ -1666,7 +1728,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     const refreshAutomationState = async () => {
       try {
         await loadAutomationSettings();
-        await loadRecordings();
+        await loadRecordings({ remote: false });
       } catch {
         // Keep background UI polling quiet; explicit actions surface their own errors.
       }
@@ -1706,7 +1768,12 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const selectedCleanupCount = [...selected].filter((id) => {
     const row = allRows.find((item) => item.id === id);
     return row
-      ? transcriptionVariants(row).some((item) => item.status === "completed" && item.text.trim())
+      ? transcriptionVariants(row).some(
+          (item) =>
+            item.status === "completed" &&
+            item.text.trim() &&
+            item.postprocess?.status !== "running"
+        )
       : false;
   }).length;
   const authModeLabel =
@@ -1749,7 +1816,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
         ? Boolean(sttSettings?.hasSonioxApiKey)
         : Boolean(sttSettings?.hasApiKey);
   const postprocessKeyReady =
-    !sttSettings?.postprocessEnabled || Boolean(sttSettings?.hasApiKey);
+    !sttSettings?.postprocessEnabled || cleanupReady;
   const transcriptionPipelineReady = sttKeyReady && postprocessKeyReady;
 
   const connectPlaud = async () => {
@@ -1866,7 +1933,8 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
         text: `Synced ${body.newRecordings + body.updatedRecordings} recording(s), skipped ${body.skippedRecordings}.`
       });
       setSelected(new Set());
-      await refreshAll();
+      await loadConnection();
+      await loadRecordings({ remote: false });
     } catch (error) {
       void loadSyncProgress();
       setNotice({
@@ -2036,7 +2104,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       const body = await response.json();
       if (!response.ok) throw new Error(apiErrorMessage(body, "Automation run failed"));
       setAutomationSettings(body.settings as AutomationSettings);
-      await loadRecordings();
+      await loadRecordings({ remote: false });
       setNotice({ type: "ok", text: body.settings?.lastRunMessage || "Automation run completed." });
     } catch (error) {
       setNotice({
@@ -2080,7 +2148,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
         setNotice({ type: "ok", text: `Transcribed ${ids.length} recording(s).` });
       }
       setSelected(new Set());
-      await refreshAll();
+      await loadRecordings({ remote: false });
     } catch (error) {
       setNotice({
         type: "error",
@@ -2126,8 +2194,16 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(apiErrorMessage(body, "Transcript cleanup failed"));
-      setNotice({ type: "ok", text: "Transcript cleaned." });
-      await refreshAll();
+      const status =
+        typeof body.job?.status === "string" ? (body.job.status as string) : "started";
+      setNotice({
+        type: "ok",
+        text:
+          status === "running"
+            ? "Transcript cleanup is already running."
+            : "Transcript cleanup started."
+      });
+      await loadRecordings({ remote: false });
     } catch (error) {
       setNotice({
         type: "error",
@@ -2160,7 +2236,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
             ? "OpenClaw sent."
             : delivery?.error || "OpenClaw retry finished without a sent status."
       });
-      await loadRecordings();
+      await loadRecordings({ remote: false });
     } catch (error) {
       setNotice({
         type: "error",
@@ -2187,7 +2263,12 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     const ids = [...selected].filter((id) => {
       const row = allRows.find((item) => item.id === id);
       return row
-        ? transcriptionVariants(row).some((item) => item.status === "completed" && item.text.trim())
+        ? transcriptionVariants(row).some(
+            (item) =>
+              item.status === "completed" &&
+              item.text.trim() &&
+              item.postprocess?.status !== "running"
+          )
         : false;
     });
 
@@ -2210,8 +2291,24 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       const body = await response.json();
       if (!response.ok) throw new Error(apiErrorMessage(body, "Transcript cleanup failed"));
       setSelected(new Set());
-      setNotice({ type: "ok", text: `Cleaned ${ids.length} transcript(s).` });
-      await refreshAll();
+      const results = (Array.isArray(body.results) ? body.results : []) as {
+        status?: string;
+        error?: string;
+      }[];
+      const failed = results.filter((result) => result.status === "failed");
+      const queued = results.filter(
+        (result) => result.status === "started" || result.status === "running"
+      );
+      setNotice({
+        type: failed.length > 0 ? "error" : "ok",
+        text:
+          failed.length > 0
+            ? `${failed.length} cleanup job(s) could not start: ${
+                failed[0]?.error || "cleanup start failed"
+              }`
+            : `Started cleanup for ${queued.length || ids.length} transcript(s).`
+      });
+      await loadRecordings({ remote: false });
     } catch (error) {
       setNotice({
         type: "error",
@@ -2716,15 +2813,23 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                         ? void cleanupTranscript(detailRecording.id, detailCleanupTarget.model)
                         : undefined
                     }
-                    disabled={!detailCleanupTarget || !cleanupReady || busy !== null}
+                    disabled={
+                      !detailCleanupTarget ||
+                      !cleanupReady ||
+                      busy !== null ||
+                      detailCleanupTarget.postprocess?.status === "running"
+                    }
                   >
                     {detailCleanupTarget &&
-                    busy === cleanupBusyKey(detailRecording.id, detailCleanupTarget.model) ? (
+                    (busy === cleanupBusyKey(detailRecording.id, detailCleanupTarget.model) ||
+                      detailCleanupTarget.postprocess?.status === "running") ? (
                       <Loader2 className="spin" size={17} />
                     ) : (
                       <Sparkles size={17} />
                     )}
-                    <span>Clean</span>
+                    <span>
+                      {detailCleanupTarget?.postprocess?.status === "running" ? "Cleaning" : "Clean"}
+                    </span>
                   </button>
                   <button
                     className="primary-button"
@@ -2784,6 +2889,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     sttSettings={sttSettings}
                     expandedTranscripts={expandedTranscripts}
                     rawTranscriptViews={rawTranscriptViews}
+                    cleanupReady={cleanupReady}
                     toggleTranscript={toggleTranscript}
                     setTranscriptView={setTranscriptView}
                     copyTranscript={copyTranscript}

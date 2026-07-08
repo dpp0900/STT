@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { errorBody, normalizeError } from "@/lib/errors";
-import { runTranscriptCleanupForRecording } from "@/lib/stt/transcribe";
+import { startTranscriptCleanupJob } from "@/lib/stt/cleanup-jobs";
 
 export async function POST(
   request: Request,
@@ -14,8 +14,11 @@ export async function POST(
       model?: unknown;
     } | null;
     const model = typeof body?.model === "string" ? body.model : undefined;
-    const result = await runTranscriptCleanupForRecording(id, model);
-    return NextResponse.json({ success: true, result });
+    const job = await startTranscriptCleanupJob(id, model);
+    return NextResponse.json(
+      { success: true, job },
+      { status: job.started ? 202 : 200 }
+    );
   } catch (error) {
     const normalized = normalizeError(error);
     return NextResponse.json(errorBody(normalized), {
