@@ -108,10 +108,10 @@ ssh -L 3000:localhost:3000 -L 8199:localhost:8199 user@server
 
 Then browse to `http://localhost:3000` and press `Connect in browser`.
 
-In Docker, `docker-compose.yml` publishes the app on `${APP_PORT:-3000}` and
-binds the Plaud loopback callback to `127.0.0.1:${PLAUD_OAUTH_LOOPBACK_PORT:-8199}`.
-Use an SSH tunnel for the callback unless you intentionally add a public callback
-endpoint.
+On Linux, `docker-compose.yml` runs the app with host networking. The app listens
+on `${APP_PORT:-3000}` directly on the host, and the Plaud loopback callback
+listens on `${PLAUD_OAUTH_LOOPBACK_PORT:-8199}`. Use an SSH tunnel for both ports
+when operating the server remotely.
 
 Optional deployment overrides:
 
@@ -156,26 +156,23 @@ The app can send the final transcript to OpenClaw after STT completes and LLM
 cleanup succeeds. It calls OpenClaw's hook agent endpoint, usually:
 
 ```text
-http://host.docker.internal:18790/hooks/agent
+http://127.0.0.1:18789/hooks/agent
 ```
 
 Enable OpenClaw hooks in the OpenClaw Gateway config with a dedicated hook token,
-then paste that URL and token in this app's Settings -> OpenClaw. In Docker,
-`docker-compose.yml` runs a small loopback proxy that forwards
-`host.docker.internal:18790` to a Gateway bound on the Ubuntu host at
-`127.0.0.1:18789`. This avoids exposing OpenClaw outside the Docker host.
+then paste that URL and token in this app's Settings -> OpenClaw. The Docker
+deployment uses host networking on Ubuntu, so `127.0.0.1:18789` points at the
+OpenClaw Gateway running on the same host without a separate proxy container.
 
 Optional env overrides:
 
 ```bash
 OPENCLAW_ENABLED=true
-OPENCLAW_WEBHOOK_URL=http://host.docker.internal:18790/hooks/agent
+OPENCLAW_WEBHOOK_URL=http://127.0.0.1:18789/hooks/agent
 OPENCLAW_HOOK_TOKEN=<shared hook token>
 OPENCLAW_MODEL=
 OPENCLAW_THINKING=
 OPENCLAW_DELIVER=false
-OPENCLAW_GATEWAY_PORT=18789
-OPENCLAW_PROXY_PORT=18790
 ```
 
 OpenClaw sends use an idempotency key derived from the recording, STT model, and

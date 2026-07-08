@@ -209,7 +209,7 @@ export const MIN_AUTOMATION_TRANSCRIBE_BATCH_SIZE = 1;
 export const MAX_AUTOMATION_TRANSCRIBE_BATCH_SIZE = 20;
 export const DEFAULT_AUTOMATION_TRANSCRIBE_BATCH_SIZE = 3;
 export const DEFAULT_OPENCLAW_WEBHOOK_URL =
-  "http://host.docker.internal:18790/hooks/agent";
+  "http://127.0.0.1:18789/hooks/agent";
 export const DEFAULT_OPENCLAW_PROMPT_TEMPLATE = [
   "Plaud transcription completed.",
   "",

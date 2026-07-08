@@ -1006,7 +1006,7 @@ function OpenClawSettingsCard({
         onChange={(event) =>
           onChange({ ...settings, webhookUrl: event.target.value })
         }
-        placeholder="http://host.docker.internal:18790/hooks/agent"
+        placeholder="http://127.0.0.1:18789/hooks/agent"
         aria-label="OpenClaw webhook URL"
         disabled={settings.envWebhookUrl}
         spellCheck={false}
