@@ -22,7 +22,7 @@ interface CleanupJob {
 
 type CleanupJobGlobal = typeof globalThis & {
   __plaudeCleanupJobs?: Map<string, CleanupJob>;
-  __plaudeCleanupRecoveryStarted?: boolean;
+  __plaudeCleanupRecoveryPromise?: Promise<void>;
 };
 
 function jobStore(): Map<string, CleanupJob> {
@@ -35,20 +35,21 @@ function jobKey(recordingId: string, model: string): string {
   return `${recordingId}::${model}`;
 }
 
-export function ensureCleanupJobRuntime(): void {
+export function ensureCleanupJobRuntime(): Promise<void> {
   const globalState = globalThis as CleanupJobGlobal;
-  if (globalState.__plaudeCleanupRecoveryStarted) return;
-  globalState.__plaudeCleanupRecoveryStarted = true;
-  void recoverInterruptedCleanupJobs().catch((error) => {
-    console.error("Failed to recover interrupted cleanup jobs.", error);
-  });
+  globalState.__plaudeCleanupRecoveryPromise ??= recoverInterruptedCleanupJobs()
+    .then(() => undefined)
+    .catch((error) => {
+      console.error("Failed to recover interrupted cleanup jobs.", error);
+    });
+  return globalState.__plaudeCleanupRecoveryPromise;
 }
 
 export async function startTranscriptCleanupJob(
   recordingId: string,
   model?: string
 ): Promise<CleanupJobStartResult> {
-  ensureCleanupJobRuntime();
+  await ensureCleanupJobRuntime();
   const target = await resolveTranscriptCleanupTarget(recordingId, model);
   const key = jobKey(target.recordingId, target.model);
   const jobs = jobStore();
