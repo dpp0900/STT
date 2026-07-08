@@ -487,6 +487,10 @@ function cleanupBusyKey(recordingId: string, model: string): string {
   return `cleanup:${recordingId}:${model}`;
 }
 
+function openClawBusyKey(recordingId: string, model: string): string {
+  return `openclaw:${recordingId}:${model}`;
+}
+
 function transcriptionText(transcription: TranscriptionState): string {
   if (transcription.postprocess?.status === "completed" && transcription.postprocess.text) {
     return transcription.postprocess.text;
@@ -1199,6 +1203,7 @@ function TranscriptStack({
   setTranscriptView,
   copyTranscript,
   cleanupTranscript,
+  retryOpenClaw,
   busy
 }: {
   recordingId: string;
@@ -1210,6 +1215,7 @@ function TranscriptStack({
   setTranscriptView: (id: string, view: "cleaned" | "raw") => void;
   copyTranscript: (text: string) => Promise<void>;
   cleanupTranscript: (recordingId: string, model: string) => void;
+  retryOpenClaw: (recordingId: string, model: string) => void;
   busy: string | null;
 }) {
   return (
@@ -1235,6 +1241,7 @@ function TranscriptStack({
         const speakerTurns = parseSpeakerTurns(text);
         const copyText = text;
         const cleanupBusy = busy === cleanupBusyKey(recordingId, transcript.model);
+        const openClawBusy = busy === openClawBusyKey(recordingId, transcript.model);
         const progressState = activeProgress(transcript);
 
         return (
@@ -1295,6 +1302,17 @@ function TranscriptStack({
                   {cleanupBusy ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}
                   <span>{postprocess?.status === "completed" ? "Clean again" : "Clean"}</span>
                 </button>
+                {transcript.openClaw?.status === "failed" && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => retryOpenClaw(recordingId, transcript.model)}
+                    disabled={busy !== null || transcript.status !== "completed"}
+                  >
+                    {openClawBusy ? <Loader2 className="spin" size={15} /> : <PlugZap size={15} />}
+                    <span>Retry OpenClaw</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="text-button"
@@ -2074,6 +2092,39 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     }
   };
 
+  const retryOpenClaw = async (recordingId: string, model: string) => {
+    setBusy(openClawBusyKey(recordingId, model));
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/transcriptions/${encodeURIComponent(recordingId)}/openclaw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(apiErrorMessage(body, "OpenClaw retry failed"));
+      const updated =
+        (body.transcriptions?.[model] as TranscriptionState | undefined) ??
+        (body.transcription as TranscriptionState | undefined);
+      const delivery = updated?.openClaw;
+      setNotice({
+        type: delivery?.status === "sent" ? "ok" : "error",
+        text:
+          delivery?.status === "sent"
+            ? "OpenClaw sent."
+            : delivery?.error || "OpenClaw retry finished without a sent status."
+      });
+      await loadRecordings();
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "OpenClaw retry failed"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const cleanupSelected = async () => {
     if (!sttSettings?.hasApiKey) {
       setNotice({
@@ -2659,6 +2710,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     setTranscriptView={setTranscriptView}
                     copyTranscript={copyTranscript}
                     cleanupTranscript={(recordingId, model) => void cleanupTranscript(recordingId, model)}
+                    retryOpenClaw={(recordingId, model) => void retryOpenClaw(recordingId, model)}
                     busy={busy}
                   />
                 ) : (
