@@ -4,7 +4,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_POSTPROCESS_CHARS = 12_000;
 const POSTPROCESS_CONCURRENCY = 4;
-const RETRYABLE_OPENROUTER_STATUS = new Set([500, 502, 503, 520, 524, 529]);
+const RETRYABLE_CLEANUP_STATUS = new Set([500, 502, 503, 520, 524, 529]);
 const DEEPSEEK_V4_FLASH_MODEL = "deepseek/deepseek-v4-flash";
 
 interface OpenRouterProviderPreferences {
@@ -19,14 +19,14 @@ interface OpenRouterChatRequestBody {
     content: string;
   }[];
   provider?: OpenRouterProviderPreferences;
-  reasoning: {
+  reasoning?: {
     effort: "none";
     exclude: true;
   };
   temperature: number;
   max_tokens: number;
   stream: boolean;
-  stream_options: {
+  stream_options?: {
     include_usage: true;
   };
 }
@@ -93,12 +93,12 @@ interface CleanupStreamProgress {
   chunkProgress: number;
 }
 
-class OpenRouterChatHttpError extends Error {
+class CleanupChatHttpError extends Error {
   readonly status: number;
 
   constructor(status: number, message: string) {
     super(message);
-    this.name = "OpenRouterChatHttpError";
+    this.name = "CleanupChatHttpError";
     this.status = status;
   }
 }
@@ -245,9 +245,22 @@ function normalizeTranscriptLines(text: string): string {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-async function parseOpenRouterError(response: Response): Promise<string> {
+function cleanupChatUrl(baseUrl: string | undefined): string {
+  const trimmed = baseUrl?.trim();
+  if (!trimmed) return OPENROUTER_CHAT_URL;
+  const withoutSlash = trimmed.replace(/\/+$/, "");
+  return withoutSlash.endsWith("/chat/completions")
+    ? withoutSlash
+    : `${withoutSlash}/chat/completions`;
+}
+
+function cleanupApiLabel(baseUrl: string | undefined): string {
+  return baseUrl?.trim() ? "Cleanup API" : "OpenRouter";
+}
+
+async function parseCleanupError(response: Response, label: string): Promise<string> {
   const text = await response.text().catch(() => "");
-  const fallback = `OpenRouter returned HTTP ${response.status} ${response.statusText || "error"}.`;
+  const fallback = `${label} returned HTTP ${response.status} ${response.statusText || "error"}.`;
   if (!text) return fallback;
   try {
     const parsed = JSON.parse(text) as OpenRouterChatResponse;
@@ -294,12 +307,13 @@ function estimateChunkProgress(input: string, output: string): number {
 
 async function parseOpenRouterStream(
   response: Response,
+  label: string,
   onEvent: (event: OpenRouterChatStreamChunk) => Promise<void>
 ): Promise<void> {
   if (!response.body) {
     throw new AppError(
       ErrorCode.PlaudUpstreamError,
-      "OpenRouter returned an empty streaming response.",
+      `${label} returned an empty streaming response.`,
       502
     );
   }
@@ -325,7 +339,7 @@ async function parseOpenRouterStream(
     } catch {
       throw new AppError(
         ErrorCode.PlaudUpstreamError,
-        `OpenRouter returned an invalid streaming event: ${payload.slice(0, 180)}`,
+        `${label} returned an invalid streaming event: ${payload.slice(0, 180)}`,
         502
       );
     }
@@ -354,6 +368,7 @@ async function parseOpenRouterStream(
 
 async function requestCleanupOnce({
   apiKey,
+  baseUrl,
   model,
   transcript,
   chunkIndex,
@@ -361,12 +376,15 @@ async function requestCleanupOnce({
   onStreamProgress
 }: {
   apiKey: string;
+  baseUrl?: string;
   model: string;
   transcript: string;
   chunkIndex: number;
   totalChunks: number;
   onStreamProgress?: (progress: CleanupStreamProgress) => Promise<void> | void;
 }): Promise<{ text: string; usage?: TranscriptionUsage }> {
+  const label = cleanupApiLabel(baseUrl);
+  const isOpenRouter = !baseUrl?.trim();
   const body: OpenRouterChatRequestBody = {
     model,
     messages: [
@@ -381,28 +399,34 @@ async function requestCleanupOnce({
         ].join("\n")
       }
     ],
-    reasoning: { effort: "none", exclude: true },
     temperature: 0,
     max_tokens: 16_000,
     stream: true,
     stream_options: { include_usage: true }
   };
-  const provider = providerPreferencesForModel(model);
-  if (provider) body.provider = provider;
+  if (isOpenRouter) {
+    body.reasoning = { effort: "none", exclude: true };
+    const provider = providerPreferencesForModel(model);
+    if (provider) body.provider = provider;
+  }
 
-  const response = await fetch(OPENROUTER_CHAT_URL, {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+  if (isOpenRouter) {
+    headers["HTTP-Referer"] = "http://localhost:3000";
+    headers["X-Title"] = "Plaude STT";
+  }
+
+  const response = await fetch(cleanupChatUrl(baseUrl), {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "Plaude STT"
-    },
+    headers,
     body: JSON.stringify(body)
   });
 
   if (!response.ok) {
-    throw new OpenRouterChatHttpError(response.status, await parseOpenRouterError(response));
+    throw new CleanupChatHttpError(response.status, await parseCleanupError(response, label));
   }
 
   let content = "";
@@ -426,12 +450,12 @@ async function requestCleanupOnce({
     });
   };
 
-  await parseOpenRouterStream(response, async (event) => {
+  await parseOpenRouterStream(response, label, async (event) => {
     if (event.error) {
       const message =
         typeof event.error.message === "string"
           ? event.error.message
-          : "OpenRouter streaming request failed.";
+          : `${label} streaming request failed.`;
       throw new AppError(ErrorCode.PlaudUpstreamError, message, 502);
     }
 
@@ -448,7 +472,7 @@ async function requestCleanupOnce({
   if (!content.trim()) {
     throw new AppError(
       ErrorCode.PlaudUpstreamError,
-      "OpenRouter returned an empty transcript cleanup result.",
+      `${label} returned an empty transcript cleanup result.`,
       502
     );
   }
@@ -469,8 +493,8 @@ async function requestCleanup(
     } catch (error) {
       lastError = error;
       if (
-        !(error instanceof OpenRouterChatHttpError) ||
-        !RETRYABLE_OPENROUTER_STATUS.has(error.status) ||
+        !(error instanceof CleanupChatHttpError) ||
+        !RETRYABLE_CLEANUP_STATUS.has(error.status) ||
         attempt === 2
       ) {
         break;
@@ -506,11 +530,13 @@ async function mapWithConcurrency<T, R>(
 
 export async function postprocessTranscriptWithOpenRouter({
   apiKey,
+  baseUrl,
   model,
   transcript,
   onProgress
 }: {
   apiKey: string;
+  baseUrl?: string;
   model: string;
   transcript: string;
   onProgress?: (progress: PostprocessProgress) => Promise<void> | void;
@@ -539,6 +565,7 @@ export async function postprocessTranscriptWithOpenRouter({
       const now = new Date().toISOString();
       const result = await requestCleanup({
         apiKey,
+        baseUrl,
         model,
         transcript: part,
         chunkIndex: index,

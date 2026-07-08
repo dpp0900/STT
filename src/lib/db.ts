@@ -45,10 +45,12 @@ export interface SttSettings {
   encryptedOpenRouterApiKey: string | null;
   encryptedDeepgramApiKey: string | null;
   encryptedSonioxApiKey: string | null;
+  encryptedPostprocessApiKey: string | null;
   model: string;
   fallbackModel: string;
   postprocessEnabled: boolean;
   postprocessModel: string;
+  postprocessBaseUrl: string;
   language: string;
   chunkSeconds: number;
   overlapSeconds: number;
@@ -201,6 +203,7 @@ export interface PlaudeDb {
 export const DEFAULT_STT_MODEL = "openai/whisper-large-v3-turbo";
 export const DEFAULT_STT_FALLBACK_MODEL = "openai/whisper-large-v3-turbo";
 export const DEFAULT_POSTPROCESS_MODEL = "deepseek/deepseek-v4-flash";
+export const DEFAULT_POSTPROCESS_BASE_URL = "";
 export const MIN_STT_CHUNK_SECONDS = 60;
 export const MAX_STT_CHUNK_SECONDS = 300;
 export const DEFAULT_STT_CHUNK_SECONDS = 300;
@@ -295,6 +298,16 @@ export const STT_MODEL_PRESETS = [
 
 export const POSTPROCESS_MODEL_PRESETS = [
   {
+    id: "gpt-5.3-codex-spark",
+    label: "Codex Spark",
+    description: "Fast Codex cleanup through a local CLIProxyAPI endpoint."
+  },
+  {
+    id: "gpt-5.5",
+    label: "Codex GPT-5.5",
+    description: "Higher-quality Codex cleanup through a local CLIProxyAPI endpoint."
+  },
+  {
     id: "deepseek/deepseek-v4-flash",
     label: "DeepSeek V4 Flash",
     description: "Low-cost long-context cleanup through OpenRouter with DeepInfra FP4-first routing."
@@ -306,10 +319,12 @@ export function defaultSttSettings(): SttSettings {
     encryptedOpenRouterApiKey: null,
     encryptedDeepgramApiKey: null,
     encryptedSonioxApiKey: null,
+    encryptedPostprocessApiKey: null,
     model: DEFAULT_STT_MODEL,
     fallbackModel: DEFAULT_STT_FALLBACK_MODEL,
     postprocessEnabled: true,
     postprocessModel: DEFAULT_POSTPROCESS_MODEL,
+    postprocessBaseUrl: DEFAULT_POSTPROCESS_BASE_URL,
     language: "ko",
     chunkSeconds: DEFAULT_STT_CHUNK_SECONDS,
     overlapSeconds: 3,
@@ -403,6 +418,15 @@ function normalizeSttSettings(settings: Partial<SttSettings> | undefined): SttSe
       typeof merged.postprocessModel === "string" && merged.postprocessModel.trim()
         ? merged.postprocessModel.trim()
         : defaults.postprocessModel,
+    postprocessBaseUrl:
+      typeof merged.postprocessBaseUrl === "string"
+        ? merged.postprocessBaseUrl.trim()
+        : defaults.postprocessBaseUrl,
+    encryptedPostprocessApiKey:
+      typeof merged.encryptedPostprocessApiKey === "string" &&
+      merged.encryptedPostprocessApiKey.trim()
+        ? merged.encryptedPostprocessApiKey
+        : null,
     chunkSeconds: numberInRange(
       merged.chunkSeconds,
       defaults.chunkSeconds,

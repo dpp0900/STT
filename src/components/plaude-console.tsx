@@ -150,10 +150,14 @@ interface SttSettings {
   hasApiKey: boolean;
   hasDeepgramApiKey: boolean;
   hasSonioxApiKey: boolean;
+  hasPostprocessApiKey: boolean;
+  envPostprocessBaseUrl: boolean;
+  envPostprocessApiKey: boolean;
   model: string;
   fallbackModel: string;
   postprocessEnabled: boolean;
   postprocessModel: string;
+  postprocessBaseUrl: string;
   language: string;
   chunkSeconds: number;
   overlapSeconds: number;
@@ -1403,6 +1407,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [deepgramApiKeyInput, setDeepgramApiKeyInput] = useState("");
   const [sonioxApiKeyInput, setSonioxApiKeyInput] = useState("");
+  const [postprocessApiKeyInput, setPostprocessApiKeyInput] = useState("");
   const [openClawWebhookTokenInput, setOpenClawWebhookTokenInput] = useState("");
   const [sttSettings, setSttSettings] = useState<SttSettings | null>(null);
   const [automationSettings, setAutomationSettings] = useState<AutomationSettings | null>(null);
@@ -1715,6 +1720,10 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const selectedPostprocessPreset = sttSettings?.postprocessPresets.find(
     (preset) => preset.id === sttSettings.postprocessModel
   );
+  const cleanupReady = Boolean(
+    sttSettings?.hasPostprocessApiKey ||
+      (!sttSettings?.postprocessBaseUrl && sttSettings?.hasApiKey)
+  );
   const selectedProvider = providerForModel(sttSettings?.model);
   const overviewTiles = [
     {
@@ -1919,10 +1928,12 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
           apiKey: apiKeyInput.trim() || undefined,
           deepgramApiKey: deepgramApiKeyInput.trim() || undefined,
           sonioxApiKey: sonioxApiKeyInput.trim() || undefined,
+          postprocessApiKey: postprocessApiKeyInput.trim() || undefined,
           model: sttSettings.model,
           fallbackModel: sttSettings.fallbackModel,
           postprocessEnabled: sttSettings.postprocessEnabled,
           postprocessModel: sttSettings.postprocessModel,
+          postprocessBaseUrl: sttSettings.postprocessBaseUrl,
           language: sttSettings.language,
           chunkSeconds: sttSettings.chunkSeconds,
           overlapSeconds: sttSettings.overlapSeconds,
@@ -1936,6 +1947,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
       setApiKeyInput("");
       setDeepgramApiKeyInput("");
       setSonioxApiKeyInput("");
+      setPostprocessApiKeyInput("");
       setProviderUsage(null);
       setSettingsOpen(false);
       setNotice({ type: "ok", text: "STT settings saved." });
@@ -2092,10 +2104,14 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   };
 
   const cleanupTranscript = async (recordingId: string, model?: string) => {
-    if (!sttSettings?.hasApiKey) {
+    const cleanupKeyReady = Boolean(
+      sttSettings?.hasPostprocessApiKey ||
+        (!sttSettings?.postprocessBaseUrl && sttSettings?.hasApiKey)
+    );
+    if (!cleanupKeyReady) {
       setNotice({
         type: "error",
-        text: "Set an OpenRouter API key before cleaning transcripts."
+        text: "Set a cleanup API key before cleaning transcripts."
       });
       return;
     }
@@ -2156,10 +2172,14 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   };
 
   const cleanupSelected = async () => {
-    if (!sttSettings?.hasApiKey) {
+    const cleanupKeyReady = Boolean(
+      sttSettings?.hasPostprocessApiKey ||
+        (!sttSettings?.postprocessBaseUrl && sttSettings?.hasApiKey)
+    );
+    if (!cleanupKeyReady) {
       setNotice({
         type: "error",
-        text: "Set an OpenRouter API key before cleaning transcripts."
+        text: "Set a cleanup API key before cleaning transcripts."
       });
       return;
     }
@@ -2422,6 +2442,9 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                       <span className={`key-status ${sttSettings.hasSonioxApiKey ? "ready" : ""}`}>
                         Soniox {sttSettings.hasSonioxApiKey ? "saved" : "empty"}
                       </span>
+                      <span className={`key-status ${cleanupReady ? "ready" : ""}`}>
+                        Cleanup {cleanupReady ? "ready" : "empty"}
+                      </span>
                     </div>
                   </div>
                   <input
@@ -2447,6 +2470,21 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     placeholder={sttSettings.hasSonioxApiKey ? "Soniox key saved" : "Soniox API key"}
                     aria-label="Soniox API key"
                     spellCheck={false}
+                  />
+                  <input
+                    value={postprocessApiKeyInput}
+                    onChange={(event) => setPostprocessApiKeyInput(event.target.value)}
+                    type="password"
+                    placeholder={
+                      sttSettings.envPostprocessApiKey
+                        ? "Cleanup key set by server env"
+                        : sttSettings.hasPostprocessApiKey
+                        ? "Cleanup key saved"
+                        : "Cleanup API key"
+                    }
+                    aria-label="Cleanup API key"
+                    spellCheck={false}
+                    disabled={sttSettings.envPostprocessApiKey}
                   />
                   <select
                     value={sttSettings.model}
@@ -2477,9 +2515,19 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     />
                     <span>
                       <strong>LLM cleanup</strong>
-                      <small>Clean STT text after transcription with OpenRouter.</small>
+                      <small>Clean STT text after transcription with a configurable chat API.</small>
                     </span>
                   </label>
+                  <input
+                    value={sttSettings.postprocessBaseUrl}
+                    onChange={(event) =>
+                      setSttSettings({ ...sttSettings, postprocessBaseUrl: event.target.value })
+                    }
+                    placeholder="Cleanup base URL, e.g. http://127.0.0.1:8317/v1"
+                    aria-label="Cleanup API base URL"
+                    spellCheck={false}
+                    disabled={!sttSettings.postprocessEnabled || sttSettings.envPostprocessBaseUrl}
+                  />
                   <select
                     value={sttSettings.postprocessModel}
                     onChange={(event) =>
@@ -2668,7 +2716,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                         ? void cleanupTranscript(detailRecording.id, detailCleanupTarget.model)
                         : undefined
                     }
-                    disabled={!detailCleanupTarget || !sttSettings?.hasApiKey || busy !== null}
+                    disabled={!detailCleanupTarget || !cleanupReady || busy !== null}
                   >
                     {detailCleanupTarget &&
                     busy === cleanupBusyKey(detailRecording.id, detailCleanupTarget.model) ? (
@@ -2792,7 +2840,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                     className="secondary-button"
                     type="button"
                     onClick={() => void cleanupSelected()}
-                    disabled={!sttSettings?.hasApiKey || selectedCleanupCount === 0 || busy !== null}
+                    disabled={!cleanupReady || selectedCleanupCount === 0 || busy !== null}
                   >
                     {busy === "cleanup" ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
                     <span>Clean {selectedCleanupCount ? `(${selectedCleanupCount})` : "selected"}</span>

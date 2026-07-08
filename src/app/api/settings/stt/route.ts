@@ -17,10 +17,20 @@ function publicSettings(settings: Awaited<ReturnType<typeof readDb>>["sttSetting
     encryptedOpenRouterApiKey: _openRouterApiKey,
     encryptedDeepgramApiKey: _deepgramApiKey,
     encryptedSonioxApiKey: _sonioxApiKey,
+    encryptedPostprocessApiKey: _postprocessApiKey,
     ...rest
   } = settings;
+  const envPostprocessBaseUrl = envValue(
+    "POSTPROCESS_BASE_URL",
+    "CLEANUP_BASE_URL",
+    "POSTPROCESS_API_BASE_URL",
+    "CLEANUP_API_BASE_URL"
+  );
+  const envPostprocessModel = envValue("POSTPROCESS_MODEL", "CLEANUP_MODEL");
   return {
     ...rest,
+    postprocessModel: envPostprocessModel || rest.postprocessModel,
+    postprocessBaseUrl: envPostprocessBaseUrl || rest.postprocessBaseUrl,
     hasApiKey: Boolean(
       settings.encryptedOpenRouterApiKey ||
         envValue("OPENROUTER_API_KEY", "OPENROUTER_KEY", "openrouter", "openrouter_api_key")
@@ -33,6 +43,12 @@ function publicSettings(settings: Awaited<ReturnType<typeof readDb>>["sttSetting
       settings.encryptedSonioxApiKey ||
         envValue("SONIOX_API_KEY", "SONIOX_KEY", "soniox", "soniox_api_key")
     ),
+    hasPostprocessApiKey: Boolean(
+      settings.encryptedPostprocessApiKey ||
+        envValue("POSTPROCESS_API_KEY", "CLEANUP_API_KEY")
+    ),
+    envPostprocessBaseUrl: Boolean(envPostprocessBaseUrl),
+    envPostprocessApiKey: Boolean(envValue("POSTPROCESS_API_KEY", "CLEANUP_API_KEY")),
     presets: STT_MODEL_PRESETS,
     postprocessPresets: POSTPROCESS_MODEL_PRESETS
   };
@@ -87,10 +103,12 @@ export async function PUT(request: Request) {
       apiKey?: unknown;
       deepgramApiKey?: unknown;
       sonioxApiKey?: unknown;
+      postprocessApiKey?: unknown;
       model?: unknown;
       fallbackModel?: unknown;
       postprocessEnabled?: unknown;
       postprocessModel?: unknown;
+      postprocessBaseUrl?: unknown;
       language?: unknown;
       chunkSeconds?: unknown;
       overlapSeconds?: unknown;
@@ -126,6 +144,10 @@ export async function PUT(request: Request) {
           typeof body.postprocessModel === "string" && body.postprocessModel.trim()
             ? body.postprocessModel.trim()
             : current.postprocessModel,
+        postprocessBaseUrl:
+          typeof body.postprocessBaseUrl === "string"
+            ? body.postprocessBaseUrl.trim()
+            : current.postprocessBaseUrl,
         language:
           typeof body.language === "string" && body.language.trim()
             ? body.language.trim().toLowerCase()
@@ -191,6 +213,21 @@ export async function PUT(request: Request) {
         const sonioxApiKey = body.sonioxApiKey.trim();
         next.encryptedSonioxApiKey = sonioxApiKey
           ? await encryptSecret(sonioxApiKey)
+          : null;
+      }
+
+      if (body.postprocessApiKey !== undefined) {
+        if (typeof body.postprocessApiKey !== "string") {
+          throw new AppError(
+            ErrorCode.InvalidInput,
+            "Cleanup API key must be a string.",
+            400,
+            { field: "postprocessApiKey" }
+          );
+        }
+        const postprocessApiKey = body.postprocessApiKey.trim();
+        next.encryptedPostprocessApiKey = postprocessApiKey
+          ? await encryptSecret(postprocessApiKey)
           : null;
       }
 

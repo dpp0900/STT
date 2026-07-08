@@ -233,6 +233,43 @@ function providerDisplayName(provider: SttProvider): string {
   return "OpenRouter";
 }
 
+function effectivePostprocessModel(settings: SttSettings): string {
+  return envValue("POSTPROCESS_MODEL", "CLEANUP_MODEL") || settings.postprocessModel;
+}
+
+function effectivePostprocessBaseUrl(settings: SttSettings): string {
+  return (
+    envValue(
+      "POSTPROCESS_BASE_URL",
+      "CLEANUP_BASE_URL",
+      "POSTPROCESS_API_BASE_URL",
+      "CLEANUP_API_BASE_URL"
+    ) ||
+    settings.postprocessBaseUrl ||
+    ""
+  );
+}
+
+async function postprocessApiKey(settings: SttSettings, baseUrl: string): Promise<string> {
+  const envKey = envValue("POSTPROCESS_API_KEY", "CLEANUP_API_KEY");
+  if (envKey) return envKey;
+
+  if (settings.encryptedPostprocessApiKey) {
+    return decryptSecret(settings.encryptedPostprocessApiKey);
+  }
+
+  if (!baseUrl.trim()) {
+    return apiKeyForProvider(settings, "openrouter");
+  }
+
+  throw new AppError(
+    ErrorCode.InvalidInput,
+    "Set a cleanup API key before cleaning transcripts.",
+    400,
+    { field: "postprocessApiKey" }
+  );
+}
+
 async function apiKeyForProvider(settings: SttSettings, provider: SttProvider): Promise<string> {
   const encryptedApiKey = settings[providerKeyField(provider)];
   if (encryptedApiKey) return decryptSecret(encryptedApiKey);
@@ -335,7 +372,8 @@ async function runPostprocessForModel(
     return;
   }
 
-  const postprocessModel = settings.postprocessModel;
+  const postprocessModel = effectivePostprocessModel(settings);
+  const postprocessBaseUrl = effectivePostprocessBaseUrl(settings);
   await setRecordingTranscription(recordingId, (item) => {
     const state = transcriptionForModel(item, transcriptionModel);
     if (!state) return;
@@ -373,9 +411,10 @@ async function runPostprocessForModel(
   };
 
   try {
-    const apiKey = await apiKeyForProvider(settings, "openrouter");
+    const apiKey = await postprocessApiKey(settings, postprocessBaseUrl);
     const result = await postprocessTranscriptWithOpenRouter({
       apiKey,
+      baseUrl: postprocessBaseUrl,
       model: postprocessModel,
       transcript: transcription.text,
       onProgress: queueProgressWrite

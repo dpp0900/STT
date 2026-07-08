@@ -141,10 +141,18 @@ to `https://openrouter.ai/api/v1/audio/transcriptions` with `language: "ko"`,
 and merges the chunk transcripts. This avoids a practical length ceiling for
 long recordings.
 
-Transcript cleanup uses `deepseek/deepseek-v4-flash` through OpenRouter with
-DeepInfra FP4-first provider routing for the lowest observed OpenRouter price. Long
-transcripts are split into chunks and cleaned in parallel; batch cleanup runs two
-recordings at once by default. Tune it with `CLEANUP_RECORDING_CONCURRENCY=1..3`.
+Transcript cleanup defaults to `deepseek/deepseek-v4-flash` through OpenRouter
+when no cleanup base URL is configured. For Codex via CLIProxyAPI, set:
+
+```env
+POSTPROCESS_BASE_URL=http://127.0.0.1:8317/v1
+POSTPROCESS_API_KEY=<cli-proxy-api-key>
+POSTPROCESS_MODEL=gpt-5.3-codex-spark
+```
+
+Long transcripts are split into chunks and cleaned in parallel; batch cleanup
+runs two recordings at once by default. Tune it with
+`CLEANUP_RECORDING_CONCURRENCY=1..3`.
 
 Automation can be enabled from Settings. Auto sync periodically downloads Plaud
 recordings on the server, and auto transcription processes newly downloaded local
