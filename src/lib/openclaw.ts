@@ -195,10 +195,20 @@ export function publicOpenClawSettings(settings: OpenClawSettings): Omit<
   } = settings;
   const envWebhookUrl = envValue("OPENCLAW_WEBHOOK_URL", "OPENCLAW_HOOK_URL");
   const envEnabled = envBoolean("OPENCLAW_ENABLED");
+  const envDeliver = envBoolean("OPENCLAW_DELIVER");
   return {
     ...publicSettings,
     enabled: envEnabled ?? publicSettings.enabled,
     webhookUrl: envWebhookUrl || publicSettings.webhookUrl,
+    model: envValue("OPENCLAW_MODEL") || publicSettings.model,
+    thinking: envValue("OPENCLAW_THINKING") || publicSettings.thinking,
+    deliver: envDeliver ?? publicSettings.deliver,
+    deliveryChannel:
+      envValue("OPENCLAW_DELIVERY_CHANNEL", "OPENCLAW_CHANNEL") ||
+      publicSettings.deliveryChannel,
+    deliveryTarget:
+      envValue("OPENCLAW_DELIVERY_TARGET", "OPENCLAW_TO") ||
+      publicSettings.deliveryTarget,
     hasWebhookToken: Boolean(
       settings.encryptedWebhookToken ||
         envValue("OPENCLAW_HOOK_TOKEN", "OPENCLAW_WEBHOOK_TOKEN")
