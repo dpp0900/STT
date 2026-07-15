@@ -127,6 +127,11 @@ PLAUD_REFRESH_URL=https://platform.plaud.ai/developer/api/oauth/third-party/acce
 that exact registered callback URL. The built-in Plaud CLI client works best
 with the default `localhost:8199` callback.
 
+The callback URL can also be saved from Settings under `Plaud web OAuth`.
+Leave it empty to use the CLI-compatible `localhost:8199` callback. A saved
+server callback must end with `/api/plaud/auth/oauth/callback`. The environment
+variable takes precedence and locks the web field when it is set.
+
 ## Korean STT
 
 1. Open the app.

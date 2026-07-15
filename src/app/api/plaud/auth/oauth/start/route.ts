@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { readDb } from "@/lib/db";
 import { errorBody, normalizeError } from "@/lib/errors";
 import { createPlaudLoopbackAuthorizationUrl } from "@/lib/plaud/oauth-loopback";
 import { createPlaudOAuthAuthorizationRequest } from "@/lib/plaud/oauth";
+import {
+  envPlaudOAuthRedirectUri,
+  normalizePlaudOAuthRedirectUri
+} from "@/lib/plaud/oauth-redirect";
 import { createSignedPlaudOAuthState } from "@/lib/plaud/oauth-state";
 
 const OAUTH_STATE_COOKIE = "plaud_oauth_state";
@@ -24,24 +29,20 @@ function appOrigin(request: Request): string {
   return new URL(request.url).origin;
 }
 
-function oauthRedirectUri(request: Request): string {
-  const configured = process.env.PLAUD_OAUTH_REDIRECT_URI?.trim();
-  if (configured) return configured;
-  return `${appOrigin(request)}/api/plaud/auth/oauth/callback`;
-}
-
 export async function GET(request: Request) {
   try {
     await requireAuth();
-    if (!process.env.PLAUD_OAUTH_REDIRECT_URI?.trim()) {
+    const db = await readDb();
+    const redirectUri =
+      envPlaudOAuthRedirectUri() ||
+      normalizePlaudOAuthRedirectUri(db.plaudOAuthSettings.redirectUri);
+    if (!redirectUri) {
       return NextResponse.redirect(
         await createPlaudLoopbackAuthorizationUrl(appOrigin(request))
       );
     }
 
-    const authorization = createPlaudOAuthAuthorizationRequest(
-      oauthRedirectUri(request)
-    );
+    const authorization = createPlaudOAuthAuthorizationRequest(redirectUri);
     const response = NextResponse.redirect(authorization.url);
     response.cookies.set({
       name: OAUTH_STATE_COOKIE,

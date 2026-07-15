@@ -191,9 +191,15 @@ export interface OpenClawSettings {
   updatedAt: string | null;
 }
 
+export interface PlaudOAuthSettings {
+  redirectUri: string;
+  updatedAt: string | null;
+}
+
 export interface PlaudeDb {
   connection: PlaudConnection | null;
   recordings: LocalRecording[];
+  plaudOAuthSettings: PlaudOAuthSettings;
   sttSettings: SttSettings;
   automationSettings: AutomationSettings;
   syncProgress: SyncProgressState;
@@ -385,9 +391,17 @@ export function defaultOpenClawSettings(): OpenClawSettings {
   };
 }
 
+export function defaultPlaudOAuthSettings(): PlaudOAuthSettings {
+  return {
+    redirectUri: "",
+    updatedAt: null
+  };
+}
+
 const EMPTY_DB: PlaudeDb = {
   connection: null,
   recordings: [],
+  plaudOAuthSettings: defaultPlaudOAuthSettings(),
   sttSettings: defaultSttSettings(),
   automationSettings: defaultAutomationSettings(),
   syncProgress: defaultSyncProgressState(),
@@ -579,6 +593,18 @@ function normalizeOpenClawSettings(
   };
 }
 
+function normalizePlaudOAuthSettings(
+  settings: Partial<PlaudOAuthSettings> | undefined
+): PlaudOAuthSettings {
+  const defaults = defaultPlaudOAuthSettings();
+  return {
+    redirectUri:
+      typeof settings?.redirectUri === "string" ? settings.redirectUri.trim() : "",
+    updatedAt:
+      typeof settings?.updatedAt === "string" ? settings.updatedAt : defaults.updatedAt
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -636,6 +662,7 @@ export async function readDb(): Promise<PlaudeDb> {
       recordings: Array.isArray(parsed.recordings)
         ? parsed.recordings.map((recording) => normalizeRecording(recording))
         : [],
+      plaudOAuthSettings: normalizePlaudOAuthSettings(parsed.plaudOAuthSettings),
       sttSettings: normalizeSttSettings(parsed.sttSettings),
       automationSettings: normalizeAutomationSettings(parsed.automationSettings),
       syncProgress: normalizeSyncProgressState(parsed.syncProgress),

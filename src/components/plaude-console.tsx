@@ -17,6 +17,7 @@ import {
   Loader2,
   PlugZap,
   RefreshCw,
+  Save,
   Settings,
   Sparkles,
   Trash2,
@@ -176,6 +177,13 @@ interface AutomationSettings {
   lastRunStartedAt: string | null;
   lastRunCompletedAt: string | null;
   lastRunMessage: string | null;
+  updatedAt: string | null;
+}
+
+interface PlaudOAuthSettings {
+  redirectUri: string;
+  envRedirectUri: boolean;
+  callbackPath: string;
   updatedAt: string | null;
 }
 
@@ -1462,11 +1470,13 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   const [postprocessApiKeyInput, setPostprocessApiKeyInput] = useState("");
   const [openClawWebhookTokenInput, setOpenClawWebhookTokenInput] = useState("");
   const [sttSettings, setSttSettings] = useState<SttSettings | null>(null);
+  const [plaudOAuthSettings, setPlaudOAuthSettings] = useState<PlaudOAuthSettings | null>(null);
   const [automationSettings, setAutomationSettings] = useState<AutomationSettings | null>(null);
   const [syncProgress, setSyncProgress] = useState<SyncProgressState | null>(null);
   const [openClawSettings, setOpenClawSettings] = useState<OpenClawSettings | null>(null);
   const [providerUsage, setProviderUsage] = useState<ProviderUsageState | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
+  const [plaudOAuthSaving, setPlaudOAuthSaving] = useState(false);
   const [automationSaving, setAutomationSaving] = useState(false);
   const [automationRunning, setAutomationRunning] = useState(false);
   const [openClawSaving, setOpenClawSaving] = useState(false);
@@ -1505,6 +1515,16 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     redirectToLoginIfNeeded(response, payload);
     if (!response.ok) throw new Error(apiErrorMessage(payload, "Failed to load STT settings"));
     setSttSettings(payload.settings as SttSettings);
+  }, []);
+
+  const loadPlaudOAuthSettings = useCallback(async () => {
+    const response = await fetch("/api/settings/plaud", { cache: "no-store" });
+    const payload = await response.json();
+    redirectToLoginIfNeeded(response, payload);
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(payload, "Failed to load Plaud OAuth settings"));
+    }
+    setPlaudOAuthSettings(payload.settings as PlaudOAuthSettings);
   }, []);
 
   const loadAutomationSettings = useCallback(async () => {
@@ -1555,6 +1575,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     setNotice(null);
     try {
       await loadConnection();
+      await loadPlaudOAuthSettings();
       await loadSttSettings();
       await loadAutomationSettings();
       await loadSyncProgress();
@@ -1572,6 +1593,7 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     loadAutomationSettings,
     loadConnection,
     loadOpenClawSettings,
+    loadPlaudOAuthSettings,
     loadRecordings,
     loadSyncProgress,
     loadSttSettings
@@ -1628,9 +1650,16 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
   useEffect(() => {
     if (!settingsOpen) return;
     void loadProviderUsage();
+    void loadPlaudOAuthSettings();
     void loadAutomationSettings();
     void loadOpenClawSettings();
-  }, [loadAutomationSettings, loadOpenClawSettings, loadProviderUsage, settingsOpen]);
+  }, [
+    loadAutomationSettings,
+    loadOpenClawSettings,
+    loadPlaudOAuthSettings,
+    loadProviderUsage,
+    settingsOpen
+  ]);
 
   const allRows = useMemo(
     () => [...recordings.recordings, ...recordings.localOnly].sort(compareRecordingTime),
@@ -1893,20 +1922,69 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
     }
   };
 
-  const connectOAuthWeb = () => {
+  const persistPlaudOAuthSettings = async (): Promise<PlaudOAuthSettings> => {
+    if (!plaudOAuthSettings) {
+      throw new Error("Plaud OAuth settings are not loaded.");
+    }
+    if (plaudOAuthSettings.envRedirectUri) return plaudOAuthSettings;
+
+    const response = await fetch("/api/settings/plaud", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirectUri: plaudOAuthSettings.redirectUri })
+    });
+    const body = await response.json();
+    redirectToLoginIfNeeded(response, body);
+    if (!response.ok) {
+      throw new Error(apiErrorMessage(body, "Failed to save Plaud OAuth callback URL"));
+    }
+    const settings = body.settings as PlaudOAuthSettings;
+    setPlaudOAuthSettings(settings);
+    return settings;
+  };
+
+  const savePlaudOAuthSettings = async () => {
+    setPlaudOAuthSaving(true);
+    setNotice(null);
+    try {
+      await persistPlaudOAuthSettings();
+      setNotice({ type: "ok", text: "Plaud OAuth callback URL saved." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to save Plaud OAuth callback URL"
+      });
+    } finally {
+      setPlaudOAuthSaving(false);
+    }
+  };
+
+  const connectOAuthWeb = async () => {
     setBusy("oauth-web");
     setNotice(null);
     const popup = window.open(
-      "/api/plaud/auth/oauth/start",
+      "about:blank",
       "plaud-oauth",
       "popup,width=560,height=760"
     );
 
-    if (!popup) {
-      window.location.assign("/api/plaud/auth/oauth/start");
+    try {
+      await persistPlaudOAuthSettings();
+      if (!popup) {
+        window.location.assign("/api/plaud/auth/oauth/start");
+        return;
+      }
+      popup.location.replace("/api/plaud/auth/oauth/start");
+      popup.focus();
+    } catch (error) {
+      popup?.close();
+      setBusy(null);
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Plaud OAuth connection failed"
+      });
       return;
     }
-    popup.focus();
 
     const id = window.setInterval(() => {
       if (!popup.closed) return;
@@ -2481,15 +2559,72 @@ export function PlaudeConsole({ sessionUser }: { sessionUser: string }) {
                 <p className="section-copy">
                   Sign in through Plaud in a browser. The app stores the refresh token encrypted and renews access server-side.
                 </p>
-                <button
-                  className="secondary-button full-width"
-                  type="button"
-                  onClick={connectOAuthWeb}
-                  disabled={busy !== null}
-                >
-                  {busy === "oauth-web" ? <Loader2 className="spin" size={17} /> : <Link2 size={17} />}
-                  <span>Connect in browser</span>
-                </button>
+                {plaudOAuthSettings && (
+                  <>
+                    <label className="oauth-callback-field">
+                      <span>Server callback URL</span>
+                      <input
+                        type="url"
+                        value={plaudOAuthSettings.redirectUri}
+                        onChange={(event) =>
+                          setPlaudOAuthSettings({
+                            ...plaudOAuthSettings,
+                            redirectUri: event.target.value
+                          })
+                        }
+                        placeholder="https://stt.example.com/api/plaud/auth/oauth/callback"
+                        disabled={
+                          plaudOAuthSettings.envRedirectUri ||
+                          plaudOAuthSaving ||
+                          busy !== null
+                        }
+                        spellCheck={false}
+                      />
+                    </label>
+                    <div className="oauth-callback-status">
+                      <span className={`status-dot ${plaudOAuthSettings.redirectUri ? "on" : ""}`} />
+                      <span>
+                        {plaudOAuthSettings.envRedirectUri
+                          ? "Managed by server environment"
+                          : plaudOAuthSettings.redirectUri
+                            ? "Server callback"
+                            : "Local callback · localhost:8199"}
+                      </span>
+                    </div>
+                    <div className="settings-button-row">
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => void savePlaudOAuthSettings()}
+                        disabled={
+                          plaudOAuthSettings.envRedirectUri ||
+                          plaudOAuthSaving ||
+                          busy !== null
+                        }
+                      >
+                        {plaudOAuthSaving ? (
+                          <Loader2 className="spin" size={17} />
+                        ) : (
+                          <Save size={17} />
+                        )}
+                        <span>Save callback</span>
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => void connectOAuthWeb()}
+                        disabled={busy !== null || plaudOAuthSaving}
+                      >
+                        {busy === "oauth-web" ? (
+                          <Loader2 className="spin" size={17} />
+                        ) : (
+                          <Link2 size={17} />
+                        )}
+                        <span>Connect in browser</span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </section>
 
               <UsageOverviewCard
