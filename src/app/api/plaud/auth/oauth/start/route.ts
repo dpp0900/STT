@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { readDb } from "@/lib/db";
 import { errorBody, normalizeError } from "@/lib/errors";
 import { createPlaudLoopbackAuthorizationUrl } from "@/lib/plaud/oauth-loopback";
 import { createPlaudOAuthAuthorizationRequest } from "@/lib/plaud/oauth";
-import {
-  envPlaudOAuthRedirectUri,
-  normalizePlaudOAuthRedirectUri
-} from "@/lib/plaud/oauth-redirect";
 import { createSignedPlaudOAuthState } from "@/lib/plaud/oauth-state";
 
 const OAUTH_STATE_COOKIE = "plaud_oauth_state";
@@ -32,10 +27,7 @@ function appOrigin(request: Request): string {
 export async function GET(request: Request) {
   try {
     await requireAuth();
-    const db = await readDb();
-    const redirectUri =
-      envPlaudOAuthRedirectUri() ||
-      normalizePlaudOAuthRedirectUri(db.plaudOAuthSettings.redirectUri);
+    const redirectUri = process.env.PLAUD_OAUTH_REDIRECT_URI?.trim();
     if (!redirectUri) {
       return NextResponse.redirect(
         await createPlaudLoopbackAuthorizationUrl(appOrigin(request))

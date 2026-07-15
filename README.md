@@ -99,8 +99,14 @@ Plaud authorization page, then the app stores the access and refresh tokens
 encrypted in `data/db.json` and refreshes them server-side.
 
 By default this follows Plaud's official CLI flow and uses the fixed callback
-`http://localhost:8199/auth/callback`. If the app runs on a remote server, open
-the app through SSH tunnels for both the app port and callback port:
+`http://localhost:8199/auth/callback`. On a remote server, if the browser cannot
+open that localhost page after Plaud sign-in, copy the complete URL from its
+address bar, including `code` and `state`. Paste it into `Returned callback URL`
+in Settings and press `Complete callback`. The URL is processed once and is not
+stored.
+
+Alternatively, open the app through SSH tunnels for both the app port and
+callback port:
 
 ```bash
 ssh -L 3000:localhost:3000 -L 8199:localhost:8199 user@server
@@ -126,11 +132,6 @@ PLAUD_REFRESH_URL=https://platform.plaud.ai/developer/api/oauth/third-party/acce
 `PLAUD_OAUTH_REDIRECT_URI` only if you have a Plaud OAuth client that allows
 that exact registered callback URL. The built-in Plaud CLI client works best
 with the default `localhost:8199` callback.
-
-The callback URL can also be saved from Settings under `Plaud web OAuth`.
-Leave it empty to use the CLI-compatible `localhost:8199` callback. A saved
-server callback must end with `/api/plaud/auth/oauth/callback`. The environment
-variable takes precedence and locks the web field when it is set.
 
 ## Korean STT
 

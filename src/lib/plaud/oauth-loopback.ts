@@ -182,6 +182,80 @@ async function closeIfIdle(): Promise<void> {
   loopbackState.server = undefined;
 }
 
+function parseCallbackUrl(callbackUrl: string): URL {
+  let url: URL;
+  try {
+    url = new URL(callbackUrl);
+  } catch {
+    throw new AppError(
+      ErrorCode.InvalidInput,
+      "Paste the complete Plaud OAuth callback URL from the browser address bar.",
+      400,
+      { field: "callbackUrl" }
+    );
+  }
+
+  if (!["http:", "https:"].includes(url.protocol) || url.pathname !== CALLBACK_PATH) {
+    throw new AppError(
+      ErrorCode.InvalidInput,
+      `Plaud OAuth callback URL must use the ${CALLBACK_PATH} path.`,
+      400,
+      { field: "callbackUrl" }
+    );
+  }
+  return url;
+}
+
+async function completeCallbackUrl(
+  url: URL
+): Promise<PendingOAuthRequest> {
+  await cleanupPending();
+  const state = url.searchParams.get("state") ?? "";
+  const pending = await getPending(state);
+
+  const upstreamError = url.searchParams.get("error");
+  if (upstreamError) {
+    throw new AppError(
+      ErrorCode.PlaudInvalidToken,
+      url.searchParams.get("error_description") || upstreamError,
+      401
+    );
+  }
+  if (!state || !pending) {
+    throw new AppError(
+      ErrorCode.PlaudInvalidToken,
+      "OAuth state expired. Start Plaud web connect again and paste the new callback URL.",
+      401
+    );
+  }
+
+  const code = url.searchParams.get("code");
+  if (!code) {
+    throw new AppError(
+      ErrorCode.MissingRequiredField,
+      "Plaud OAuth callback URL did not include an authorization code.",
+      400
+    );
+  }
+
+  const tokenSet = await exchangePlaudOAuthCode(
+    code,
+    pending.codeVerifier,
+    pending.redirectUri,
+    pending.state
+  );
+  await savePlaudOAuthConnection({ tokenSet });
+  await deletePending(state);
+  void closeIfIdle();
+  return pending;
+}
+
+export async function completePlaudLoopbackOAuthCallback(
+  callbackUrl: string
+): Promise<void> {
+  await completeCallbackUrl(parseCallbackUrl(callbackUrl));
+}
+
 async function handleCallback(requestUrl: string | undefined, response: ServerResponse) {
   const url = new URL(requestUrl ?? "/", CALLBACK_URI);
   if (url.pathname === HEALTH_PATH) {
@@ -195,50 +269,15 @@ async function handleCallback(requestUrl: string | undefined, response: ServerRe
     return;
   }
 
-  await cleanupPending();
   const state = url.searchParams.get("state") ?? "";
-  const pending = await getPending(state);
+  const pending = state ? await getPending(state) : undefined;
 
   try {
-    const upstreamError = url.searchParams.get("error");
-    if (upstreamError) {
-      throw new AppError(
-        ErrorCode.PlaudInvalidToken,
-        url.searchParams.get("error_description") || upstreamError,
-        401
-      );
-    }
-    if (!pending) {
-      throw new AppError(
-        ErrorCode.PlaudInvalidToken,
-        "OAuth state expired. Start Plaud web connect again.",
-        401
-      );
-    }
-    const code = url.searchParams.get("code");
-    if (!code) {
-      throw new AppError(
-        ErrorCode.MissingRequiredField,
-        "Plaud OAuth callback did not include an authorization code.",
-        400
-      );
-    }
-
-    const tokenSet = await exchangePlaudOAuthCode(
-      code,
-      pending.codeVerifier,
-      pending.redirectUri,
-      pending.state
-    );
-    await savePlaudOAuthConnection({ tokenSet });
-    await deletePending(state);
-    writeHtml(response, pending, "success", "You can close this window.");
+    const completed = await completeCallbackUrl(url);
+    writeHtml(response, completed, "success", "You can close this window.");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Plaud OAuth failed.";
-    if (state) await deletePending(state);
     writeHtml(response, pending, "error", message);
-  } finally {
-    void closeIfIdle();
   }
 }
 
